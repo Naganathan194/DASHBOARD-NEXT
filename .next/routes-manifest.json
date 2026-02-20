@@ -1,0 +1,146 @@
+{
+  "version": 3,
+  "pages404": true,
+  "appType": "app",
+  "caseSensitive": false,
+  "basePath": "",
+  "redirects": [
+    {
+      "source": "/:path+/",
+      "destination": "/:path+",
+      "internal": true,
+      "priority": true,
+      "statusCode": 308,
+      "regex": "^(?:/((?:[^/]+?)(?:/(?:[^/]+?))*))/$"
+    }
+  ],
+  "headers": [],
+  "rewrites": {
+    "beforeFiles": [],
+    "afterFiles": [],
+    "fallback": []
+  },
+  "dynamicRoutes": [
+    {
+      "page": "/api/databases/[db]/collections",
+      "regex": "^/api/databases/([^/]+?)/collections(?:/)?$",
+      "routeKeys": {
+        "nxtPdb": "nxtPdb"
+      },
+      "namedRegex": "^/api/databases/(?<nxtPdb>[^/]+?)/collections(?:/)?$"
+    },
+    {
+      "page": "/api/databases/[db]/collections/[col]",
+      "regex": "^/api/databases/([^/]+?)/collections/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPdb": "nxtPdb",
+        "nxtPcol": "nxtPcol"
+      },
+      "namedRegex": "^/api/databases/(?<nxtPdb>[^/]+?)/collections/(?<nxtPcol>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/databases/[db]/collections/[col]/documents",
+      "regex": "^/api/databases/([^/]+?)/collections/([^/]+?)/documents(?:/)?$",
+      "routeKeys": {
+        "nxtPdb": "nxtPdb",
+        "nxtPcol": "nxtPcol"
+      },
+      "namedRegex": "^/api/databases/(?<nxtPdb>[^/]+?)/collections/(?<nxtPcol>[^/]+?)/documents(?:/)?$"
+    },
+    {
+      "page": "/api/databases/[db]/collections/[col]/documents/[id]",
+      "regex": "^/api/databases/([^/]+?)/collections/([^/]+?)/documents/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPdb": "nxtPdb",
+        "nxtPcol": "nxtPcol",
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/databases/(?<nxtPdb>[^/]+?)/collections/(?<nxtPcol>[^/]+?)/documents/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/databases/[db]/collections/[col]/documents/[id]/approve",
+      "regex": "^/api/databases/([^/]+?)/collections/([^/]+?)/documents/([^/]+?)/approve(?:/)?$",
+      "routeKeys": {
+        "nxtPdb": "nxtPdb",
+        "nxtPcol": "nxtPcol",
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/databases/(?<nxtPdb>[^/]+?)/collections/(?<nxtPcol>[^/]+?)/documents/(?<nxtPid>[^/]+?)/approve(?:/)?$"
+    },
+    {
+      "page": "/api/databases/[db]/collections/[col]/documents/[id]/reject",
+      "regex": "^/api/databases/([^/]+?)/collections/([^/]+?)/documents/([^/]+?)/reject(?:/)?$",
+      "routeKeys": {
+        "nxtPdb": "nxtPdb",
+        "nxtPcol": "nxtPcol",
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/databases/(?<nxtPdb>[^/]+?)/collections/(?<nxtPcol>[^/]+?)/documents/(?<nxtPid>[^/]+?)/reject(?:/)?$"
+    },
+    {
+      "page": "/api/databases/[db]/collections/[col]/stats",
+      "regex": "^/api/databases/([^/]+?)/collections/([^/]+?)/stats(?:/)?$",
+      "routeKeys": {
+        "nxtPdb": "nxtPdb",
+        "nxtPcol": "nxtPcol"
+      },
+      "namedRegex": "^/api/databases/(?<nxtPdb>[^/]+?)/collections/(?<nxtPcol>[^/]+?)/stats(?:/)?$"
+    }
+  ],
+  "staticRoutes": [
+    {
+      "page": "/",
+      "regex": "^/(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/(?:/)?$"
+    },
+    {
+      "page": "/_global-error",
+      "regex": "^/_global\\-error(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/_global\\-error(?:/)?$"
+    },
+    {
+      "page": "/_not-found",
+      "regex": "^/_not\\-found(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/_not\\-found(?:/)?$"
+    },
+    {
+      "page": "/api/checkin",
+      "regex": "^/api/checkin(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/checkin(?:/)?$"
+    },
+    {
+      "page": "/api/databases",
+      "regex": "^/api/databases(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/databases(?:/)?$"
+    },
+    {
+      "page": "/api/scan",
+      "regex": "^/api/scan(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/scan(?:/)?$"
+    }
+  ],
+  "dataRoutes": [],
+  "rsc": {
+    "header": "rsc",
+    "varyHeader": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch",
+    "prefetchHeader": "next-router-prefetch",
+    "didPostponeHeader": "x-nextjs-postponed",
+    "contentTypeHeader": "text/x-component",
+    "suffix": ".rsc",
+    "prefetchSegmentHeader": "next-router-segment-prefetch",
+    "prefetchSegmentSuffix": ".segment.rsc",
+    "prefetchSegmentDirSuffix": ".segments",
+    "clientParamParsing": false,
+    "dynamicRSCPrerender": false
+  },
+  "rewriteHeaders": {
+    "pathHeader": "x-nextjs-rewritten-path",
+    "queryHeader": "x-nextjs-rewritten-query"
+  }
+}

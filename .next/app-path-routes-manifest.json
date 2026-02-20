@@ -1,0 +1,15 @@
+{
+  "/_global-error/page": "/_global-error",
+  "/_not-found/page": "/_not-found",
+  "/api/checkin/route": "/api/checkin",
+  "/api/databases/[db]/collections/[col]/documents/[id]/approve/route": "/api/databases/[db]/collections/[col]/documents/[id]/approve",
+  "/api/databases/[db]/collections/[col]/documents/[id]/reject/route": "/api/databases/[db]/collections/[col]/documents/[id]/reject",
+  "/api/databases/[db]/collections/[col]/documents/[id]/route": "/api/databases/[db]/collections/[col]/documents/[id]",
+  "/api/databases/[db]/collections/[col]/documents/route": "/api/databases/[db]/collections/[col]/documents",
+  "/api/databases/[db]/collections/[col]/route": "/api/databases/[db]/collections/[col]",
+  "/api/databases/[db]/collections/[col]/stats/route": "/api/databases/[db]/collections/[col]/stats",
+  "/api/databases/[db]/collections/route": "/api/databases/[db]/collections",
+  "/api/databases/route": "/api/databases",
+  "/api/scan/route": "/api/scan",
+  "/page": "/"
+}

@@ -1,0 +1,3 @@
+{
+  "/api/databases/[db]/collections/[col]/documents/[id]/route": "app/api/databases/[db]/collections/[col]/documents/[id]/route.js"
+}
