@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { connectToMongo } from '@/lib/mongodb';
+import { isAllowedCollection } from '@/lib/registrationCollections';
 import { ObjectId, Filter, Document } from 'mongodb';
 
 function buildQuery(id: string): Filter<Document> {
@@ -9,6 +10,7 @@ function buildQuery(id: string): Filter<Document> {
 export async function POST(req: Request) {
   try {
     const { id, db, collection } = await req.json();
+    if (!isAllowedCollection(collection)) return NextResponse.json({ error: 'Collection not allowed' }, { status: 404 });
     const client = await connectToMongo();
     const query = buildQuery(id);
     const doc = await client.db(db).collection(collection).findOne(query);

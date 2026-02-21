@@ -1,11 +1,13 @@
 import { NextResponse } from 'next/server';
 import { connectToMongo } from '@/lib/mongodb';
+import { isAllowedCollection } from '@/lib/registrationCollections';
 
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ db: string; col: string }> }
 ) {
   const { db, col: colName } = await params;
+  if (!isAllowedCollection(colName)) return NextResponse.json({ error: 'Collection not allowed' }, { status: 404 });
   try {
     const client = await connectToMongo();
     const col = client.db(db).collection(colName);

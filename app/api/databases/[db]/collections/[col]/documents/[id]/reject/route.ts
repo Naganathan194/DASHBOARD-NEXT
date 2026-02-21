@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { connectToMongo } from '@/lib/mongodb';
 import { sendMail, APP_NAME } from '@/lib/mail';
 import { getEventDisplayName } from '@/lib/events';
+import { isAllowedCollection } from '@/lib/registrationCollections';
 import { ObjectId, Filter, Document } from 'mongodb';
 
 function buildQuery(id: string): Filter<Document> {
@@ -13,6 +14,7 @@ export async function POST(
   { params }: { params: Promise<{ db: string; col: string; id: string }> }
 ) {
   const { db, col, id } = await params;
+    if (!isAllowedCollection(col)) return NextResponse.json({ error: 'Collection not allowed' }, { status: 404 });
   try {
     const { reason } = await req.json();
     if (!reason) return NextResponse.json({ error: 'Reason required' }, { status: 400 });

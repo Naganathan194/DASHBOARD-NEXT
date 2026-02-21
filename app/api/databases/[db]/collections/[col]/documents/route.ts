@@ -1,11 +1,13 @@
 import { NextResponse } from 'next/server';
 import { connectToMongo } from '@/lib/mongodb';
+import { isAllowedCollection } from '@/lib/registrationCollections';
 
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ db: string; col: string }> }
 ) {
   const { db, col } = await params;
+  if (!isAllowedCollection(col)) return NextResponse.json({ error: 'Collection not allowed' }, { status: 404 });
   try {
     const client = await connectToMongo();
     const docs = await client.db(db).collection(col).find({}).limit(500).toArray();
@@ -20,6 +22,7 @@ export async function POST(
   { params }: { params: Promise<{ db: string; col: string }> }
 ) {
   const { db, col } = await params;
+  if (!isAllowedCollection(col)) return NextResponse.json({ error: 'Collection not allowed' }, { status: 404 });
   try {
     const body = await req.json();
     const client = await connectToMongo();

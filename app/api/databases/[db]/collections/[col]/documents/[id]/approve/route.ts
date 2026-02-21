@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { connectToMongo } from '@/lib/mongodb';
 import { sendMail, APP_NAME } from '@/lib/mail';
 import { getEventDisplayName, isEventPass } from '@/lib/events';
+import { isAllowedCollection } from '@/lib/registrationCollections';
 import { ObjectId, Filter, Document } from 'mongodb';
 import QRCode from 'qrcode';
 import crypto from 'crypto';
@@ -35,6 +36,7 @@ export async function POST(
   { params }: { params: Promise<{ db: string; col: string; id: string }> }
 ) {
   const params_ = await params;
+    if (!isAllowedCollection(params_.col)) return NextResponse.json({ error: 'Collection not allowed' }, { status: 404 });
   try {
     const client = await connectToMongo();
     const query = buildQuery(params_.id);

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { getEventDisplayName } from '@/lib/events';
+import { ALLOWED_COLLECTIONS } from '@/lib/registrationCollections';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface Doc { _id: string; [key: string]: unknown; }
@@ -416,6 +417,21 @@ export default function Dashboard() {
   const [docJsonInput, setDocJsonInput] = useState('');
   const [modals, setModals] = useState({ reject: false, doc: false, delete: false });
   const autoRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const restoringRef = useRef(false);
+  const restoredOnceRef = useRef(false);
+  const savedDbRef = useRef<string | null>(null);
+  const savedColRef = useRef<string | null>(null);
+  const savedFilterRef = useRef<string | null>(null);
+  const savedSearchRef = useRef<string | null>(null);
+  const savedDocRef = useRef<string | null>(null);
+
+  const SESSION_KEYS = {
+    db: 'dashboard:selectedDb',
+    col: 'dashboard:selectedCol',
+    filter: 'dashboard:filterStatus',
+    q: 'dashboard:searchQ',
+    doc: 'dashboard:selectedDocId',
+  } as const;
 
   const toast = useCallback((msg: string, type: 'success' | 'error' | 'info' = 'info') => {
     const id = Date.now();
@@ -459,31 +475,108 @@ export default function Dashboard() {
     setState((prev) => ({ ...prev, filtered: applyFilter(prev.docs, searchQ, filterStatus) }));
   }, [searchQ, filterStatus, applyFilter]);
 
+  // Read stored selections from sessionStorage on mount (client-side only)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const sdb = sessionStorage.getItem(SESSION_KEYS.db);
+      const scol = sessionStorage.getItem(SESSION_KEYS.col);
+      const sfilter = sessionStorage.getItem(SESSION_KEYS.filter);
+      const sq = sessionStorage.getItem(SESSION_KEYS.q);
+      const sd = sessionStorage.getItem(SESSION_KEYS.doc);
+      savedDbRef.current = sdb || null;
+      savedColRef.current = scol || null;
+      savedFilterRef.current = sfilter || null;
+      savedSearchRef.current = sq || null;
+      savedDocRef.current = sd || null;
+    } catch (e) {
+      /* ignore sessionStorage errors */
+    }
+  }, []);
+
+  // After DB list is loaded, restore saved DB/collection and filters once
+  useEffect(() => {
+    (async () => {
+      if (restoredOnceRef.current) return;
+      if (!dbs || dbs.length === 0) return;
+      const wantDb = savedDbRef.current;
+      const wantCol = savedColRef.current;
+      const wantFilter = savedFilterRef.current;
+      const wantQ = savedSearchRef.current;
+      if (!wantDb) { restoredOnceRef.current = true; return; }
+      if (!dbs.includes(wantDb)) { restoredOnceRef.current = true; return; }
+      try {
+        restoringRef.current = true;
+        const returnedCols = await onDbChange(wantDb);
+        if (wantCol && returnedCols && returnedCols.map((c) => c.toLowerCase()).includes(wantCol.toLowerCase())) {
+          const docs = await onColChange(wantCol, wantDb);
+          const wantDoc = savedDocRef.current;
+          if (wantDoc && docs && docs.map((d) => String(d._id)).includes(wantDoc)) {
+            await selectDoc(wantDoc, wantDb, wantCol);
+          }
+        }
+        if (wantFilter != null) setFilterStatus(wantFilter);
+        if (wantQ != null) setSearchQ(wantQ);
+      } catch (e) {
+        /* ignore restoration errors */
+      } finally {
+        restoringRef.current = false;
+        restoredOnceRef.current = true;
+      }
+    })();
+  }, [dbs]);
+
+  // Persist filters/search to sessionStorage when they change
+  useEffect(() => {
+    try {
+      if (!restoringRef.current && typeof window !== 'undefined') {
+        sessionStorage.setItem(SESSION_KEYS.filter, filterStatus);
+        sessionStorage.setItem(SESSION_KEYS.q, searchQ);
+      }
+    } catch (e) { /* ignore */ }
+  }, [filterStatus, searchQ]);
+
   // ── DB change ─────────────────────────────────────────────────────────────
-  const onDbChange = async (db: string) => {
+  const onDbChange = async (db: string): Promise<string[]> => {
     stopAutoRefresh();
     setState((prev) => ({ ...prev, db, col: '', docs: [], filtered: [], selected: null, details: null }));
     setCols([]);
     setStats(null);
-    if (!db) return;
+    if (!db) return [];
     try {
       const list = await api<string[]>('GET', `/databases/${db}/collections`);
-      setCols(list);
+      const lower = new Set(list.map((s) => String(s).toLowerCase()));
+      const orderedAllowed = ALLOWED_COLLECTIONS.filter((c) => lower.has(c));
+      setCols(orderedAllowed);
+      try {
+        if (!restoringRef.current && typeof window !== 'undefined') sessionStorage.setItem(SESSION_KEYS.db, db);
+        if (!restoringRef.current && typeof window !== 'undefined') sessionStorage.removeItem(SESSION_KEYS.doc);
+      } catch (e) { /* ignore */ }
+      return orderedAllowed;
     } catch (e: unknown) { toast((e as Error).message, 'error'); }
+    return [];
   };
 
   // ── Col change ────────────────────────────────────────────────────────────
-  const onColChange = async (col: string) => {
+  const onColChange = async (col: string, dbParam?: string): Promise<Doc[]> => {
+    const dbToUse = dbParam ?? state.db;
     stopAutoRefresh();
     setState((prev) => ({ ...prev, col, selected: null, docs: [] }));
     setStats(null);
-    if (!col) return;
-    await loadDocs(state.db, col);
-    await loadStats(state.db, col);
-    startAutoRefresh(state.db, col);
+    try {
+      if (!restoringRef.current && typeof window !== 'undefined') sessionStorage.removeItem(SESSION_KEYS.doc);
+    } catch (e) { /* ignore */ }
+    if (!col) return [];
+    const docs = await loadDocs(dbToUse, col);
+    await loadStats(dbToUse, col);
+    startAutoRefresh(dbToUse, col);
+    try {
+      if (!restoringRef.current && typeof window !== 'undefined') sessionStorage.setItem(SESSION_KEYS.col, col);
+    } catch (e) { /* ignore */ }
+    return docs ?? [];
   };
 
-  const loadDocs = async (db: string, col: string) => {
+  const loadDocs = async (db: string, col: string): Promise<Doc[]> => {
     showLoading('Fetching records...');
     try {
       const docs = (await api<Doc[]>('GET', `/databases/${db}/collections/${col}/documents`)).map(serialise);
@@ -496,8 +589,10 @@ export default function Dashboard() {
         ...prev, docs: sorted,
         filtered: applyFilter(sorted, searchQ, filterStatus),
       }));
+      return sorted;
     } catch (e: unknown) { toast((e as Error).message, 'error'); }
     finally { hideLoading(); }
+    return [];
   };
 
   const loadStats = async (db: string, col: string) => {
@@ -508,15 +603,20 @@ export default function Dashboard() {
   };
 
   // ── select doc ────────────────────────────────────────────────────────────
-  const selectDoc = async (id: string) => {
+  const selectDoc = async (id: string, dbParam?: string, colParam?: string) => {
+    const dbToUse = dbParam ?? state.db;
+    const colToUse = colParam ?? state.col;
     setState((prev) => ({
       ...prev,
       selected: prev.docs.find((d) => String(d._id) === id) ?? null,
     }));
     showLoading('Loading details...');
     try {
-      const doc = serialise(await api<Doc>('GET', `/databases/${state.db}/collections/${state.col}/documents/${id}`));
+      const doc = serialise(await api<Doc>('GET', `/databases/${dbToUse}/collections/${colToUse}/documents/${id}`));
       setState((prev) => ({ ...prev, details: doc }));
+      try {
+        if (!restoringRef.current && typeof window !== 'undefined') sessionStorage.setItem(SESSION_KEYS.doc, id);
+      } catch (e) { /* ignore */ }
     } catch (e: unknown) { toast((e as Error).message, 'error'); }
     finally { hideLoading(); }
   };

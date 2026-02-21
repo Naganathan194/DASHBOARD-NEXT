@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { connectToMongo } from '@/lib/mongodb';
+import { isAllowedCollection } from '@/lib/registrationCollections';
 import { ObjectId, Filter, Document } from 'mongodb';
 
 function buildQuery(id: string): Filter<Document> {
@@ -14,6 +15,7 @@ export async function POST(req: Request) {
     catch { return NextResponse.json({ error: 'Invalid QR data' }, { status: 400 }); }
 
     const { id, token, collection, db } = payload;
+    if (!isAllowedCollection(collection)) return NextResponse.json({ error: 'Collection not allowed' }, { status: 404 });
     const client = await connectToMongo();
     const doc = await client.db(db).collection(collection).findOne(buildQuery(id));
     if (!doc) return NextResponse.json({ error: 'Attendee not found' }, { status: 404 });
