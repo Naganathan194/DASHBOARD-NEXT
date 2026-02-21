@@ -1,3 +1,0 @@
-module.exports=[33290,a=>{"use strict";var b=a.i(7997);function c({children:a}){return(0,b.jsxs)("html",{lang:"en",children:[(0,b.jsxs)("head",{children:[(0,b.jsx)("link",{rel:"preconnect",href:"https://fonts.googleapis.com"}),(0,b.jsx)("link",{href:"https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap",rel:"stylesheet"}),(0,b.jsx)("link",{rel:"stylesheet",href:"https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"})]}),(0,b.jsx)("body",{children:a})]})}a.s(["default",()=>c,"metadata",0,{title:"EventManager Pro",description:"Event Management Dashboard with MongoDB, QR check-in & email notifications"}])}];
-
-//# sourceMappingURL=app_layout_tsx_271801d7._.js.map

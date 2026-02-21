@@ -48,13 +48,17 @@ __turbopack_context__.s([
     "connectToMongo",
     ()=>connectToMongo
 ]);
-var __TURBOPACK__imported__module__$5b$externals$5d2f$mongodb__$5b$external$5d$__$28$mongodb$2c$__cjs$2c$__$5b$project$5d2f$node_modules$2f$mongodb$29$__ = __turbopack_context__.i("[externals]/mongodb [external] (mongodb, cjs, [project]/node_modules/mongodb)");
+(()=>{
+    const e = new Error("Cannot find module 'mongodb'");
+    e.code = 'MODULE_NOT_FOUND';
+    throw e;
+})();
 ;
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
 let client = null;
 async function connectToMongo() {
     if (!client) {
-        client = new __TURBOPACK__imported__module__$5b$externals$5d2f$mongodb__$5b$external$5d$__$28$mongodb$2c$__cjs$2c$__$5b$project$5d2f$node_modules$2f$mongodb$29$__["MongoClient"](MONGODB_URI);
+        client = new MongoClient(MONGODB_URI);
         await client.connect();
     }
     return client;
