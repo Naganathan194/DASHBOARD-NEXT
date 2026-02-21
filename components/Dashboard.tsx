@@ -133,13 +133,14 @@ function StatsGrid({ stats }: { stats: Stats }) {
 
 // ── DocDetail ─────────────────────────────────────────────────────────────────
 function DocDetail({
-  doc, onApprove, onOpenReject, onEdit, onDelete,
+  doc, onApprove, onOpenReject, onEdit, onDelete, onResend,
 }: {
   doc: Doc;
   onApprove: (id: string) => void;
   onOpenReject: (id: string) => void;
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
+  onResend?: (id: string) => void;
 }) {
   const [imgSrc, setImgSrc] = useState('');
   const name     = getDocName(doc);
@@ -182,6 +183,11 @@ function DocDetail({
               <div style={{ color: 'var(--muted)', fontSize: 13 }}>
                 <i className="fas fa-check-circle" style={{ color: 'var(--green)' }} /> Approved – waiting check-in
               </div>
+            )}
+            {isApproved && (
+              <button className="btn btn-ghost btn-sm" onClick={() => onResend && onResend(String(doc._id))} style={{ marginLeft: 8 }}>
+                <i className="fas fa-envelope" /> Resend Email
+              </button>
             )}
             {isRejected && (
               <div style={{ color: 'var(--red)', fontSize: 13 }}>
@@ -400,7 +406,7 @@ function ScannerPanel({ onToast }: { onToast: (m: string, t: 'success' | 'error'
 // ── Dashboard (main) ─────────────────────────────────────────────────────────
 export default function Dashboard() {
   const [state, setState] = useState<AppState>({
-    db: '', col: '', docs: [], filtered: [], selected: null, details: null,
+    db: 'test', col: '', docs: [], filtered: [], selected: null, details: null,
     rejectTargetId: null, editingDoc: null, deleteTargetId: null,
   });
   const [dbs, setDbs] = useState<string[]>([]);
@@ -449,8 +455,7 @@ export default function Dashboard() {
   useEffect(() => {
     (async () => {
       try {
-        const list = await api<string[]>('GET', '/databases');
-        setDbs(list);
+        await onDbChange('test');
         setConnected(true);
       } catch (e: unknown) {
         setConnected(false);
@@ -780,10 +785,9 @@ export default function Dashboard() {
           EventManager Pro
         </div>
         <div className="header-selects">
-          <select value={state.db} onChange={(e) => onDbChange(e.target.value)}>
-            <option value="">Select Database</option>
-            {dbs.map((d) => <option key={d} value={d}>{d}</option>)}
-          </select>
+          <div style={{ padding: '8px 12px', borderRadius: 6, background: 'var(--card)', fontSize: 13 }}>
+            Database: <strong style={{ marginLeft: 6 }}>test</strong>
+          </div>
           <select value={state.col} onChange={(e) => onColChange(e.target.value)} disabled={!state.db}>
             <option value="">Select Collection</option>
             {cols.map((c) => <option key={c} value={c}>{getEventDisplayName(c)}</option>)}
@@ -874,6 +878,16 @@ export default function Dashboard() {
                 onOpenReject={openRejectModal}
                 onEdit={openEditModal}
                 onDelete={openDeleteModal}
+                onResend={async (id: string) => {
+                  showLoading('Resending email...');
+                  try {
+                    await api('POST', `/databases/${state.db}/collections/${state.col}/documents/${id}/resend`);
+                    toast('Email resent to attendee.', 'success');
+                    await loadDocs(state.db, state.col);
+                    await selectDoc(id);
+                  } catch (e: unknown) { toast((e as Error).message, 'error'); }
+                  finally { hideLoading(); }
+                }}
               />
             ) : !state.col ? (
               <div className="placeholder">
