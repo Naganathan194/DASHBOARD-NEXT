@@ -1,12 +1,15 @@
 import nodemailer from 'nodemailer';
 
-const EMAIL_USER = process.env.EMAIL_USER || 'your@gmail.com';
-const EMAIL_PASS = process.env.EMAIL_PASS || 'your_app_password';
+const EMAIL_USER = process.env.EMAIL_USER || 'your@outlook.com';
+const EMAIL_PASS = process.env.EMAIL_PASS || 'your_password';
 const APP_NAME   = process.env.APP_NAME   || 'EventManager';
 
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.office365.com',
+  port: 587,
+  secure: false, // STARTTLS
   auth: { user: EMAIL_USER, pass: EMAIL_PASS },
+  tls: { ciphers: 'SSLv3' },
 });
 
 export async function sendMail(

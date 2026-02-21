@@ -23,9 +23,24 @@ export async function POST(
   try {
     const body = await req.json();
     const client = await connectToMongo();
+
+    // Human-readable registration timestamp (IST)
+    const now = new Date();
+    const registeredAt = now.toLocaleString('en-IN', {
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+      timeZone: 'Asia/Kolkata',
+    }) + ' IST';
+
     const result = await client.db(db).collection(col).insertOne({
       ...body,
-      createdAt: new Date(),
+      registeredAt,          // e.g. "21 February 2026, 03:45:10 pm IST"
+      createdAt: now,        // raw Date kept for internal sorting / queries
       status: 'pending',
     });
     return NextResponse.json({ success: true, id: result.insertedId });

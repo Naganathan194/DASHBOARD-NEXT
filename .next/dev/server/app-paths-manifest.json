@@ -1,4 +1,5 @@
 {
+  "/api/databases/[db]/collections/[col]/documents/[id]/approve/route": "app/api/databases/[db]/collections/[col]/documents/[id]/approve/route.js",
   "/api/databases/[db]/collections/[col]/documents/[id]/route": "app/api/databases/[db]/collections/[col]/documents/[id]/route.js",
   "/api/databases/[db]/collections/[col]/documents/route": "app/api/databases/[db]/collections/[col]/documents/route.js",
   "/api/databases/[db]/collections/[col]/stats/route": "app/api/databases/[db]/collections/[col]/stats/route.js",

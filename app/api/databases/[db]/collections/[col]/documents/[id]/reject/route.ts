@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { connectToMongo } from '@/lib/mongodb';
 import { sendMail, APP_NAME } from '@/lib/mail';
+import { getEventDisplayName } from '@/lib/events';
 import { ObjectId, Filter, Document } from 'mongodb';
 
 function buildQuery(id: string): Filter<Document> {
@@ -25,30 +26,54 @@ export async function POST(
       $set: { status: 'rejected', rejectedAt: new Date(), rejectionReason: reason },
     });
 
-    const email = doc.email || doc.mail || doc.Email;
-    const name  = doc.firstName || doc.fullName || doc.name || doc.candidateName || 'Attendee';
-    const event = doc.eventName || doc.event || col;
+    const d = doc as Record<string, unknown>;
+    const email = String(d.email ?? d.mail ?? d.Email ?? '');
+
+    const firstName = String(d.firstName ?? d.first_name ?? d.fname ?? '');
+    const lastName  = String(d.lastName  ?? d.last_name  ?? d.lname  ?? '');
+    const name = firstName && lastName
+      ? `${firstName} ${lastName}`.trim()
+      : String(d.fullName ?? d.name ?? d.candidateName ?? 'Attendee');
+
+    const displayName = getEventDisplayName(col);
 
     if (email) {
       const html = `
-      <div style="font-family:'Segoe UI',sans-serif;max-width:600px;margin:auto;background:#0f172a;border-radius:16px;overflow:hidden;color:#e2e8f0">
-        <div style="background:linear-gradient(135deg,#ef4444,#dc2626);padding:40px 32px;text-align:center">
-          <h1 style="margin:0;color:#fff;font-size:28px;font-weight:700">Registration Update</h1>
-        </div>
-        <div style="padding:32px">
-          <p style="font-size:16px">Hi <strong>${name}</strong>,</p>
-          <p>We regret to inform you that your registration for <strong style="color:#f87171">${event}</strong> has not been approved.</p>
-          <div style="background:#1e293b;border-radius:12px;padding:24px;margin:24px 0;border-left:4px solid #ef4444">
-            <p style="margin:0 0 8px;color:#94a3b8;font-size:12px;text-transform:uppercase;letter-spacing:1px">Reason</p>
-            <p style="margin:0;color:#fca5a5;font-size:15px">${reason}</p>
-          </div>
-          <p style="color:#94a3b8;font-size:14px">If you have any questions, please contact the event organizer.</p>
-          <div style="border-top:1px solid #334155;margin-top:24px;padding-top:16px;text-align:center;color:#64748b;font-size:12px">
-            <p>${APP_NAME} · Automated notification</p>
-          </div>
-        </div>
-      </div>`;
-      await sendMail(email, `Registration Update for ${event}`, html);
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:24px 0;background:#060a14;font-family:'Segoe UI',Arial,sans-serif">
+<div style="max-width:600px;margin:0 auto;background:#0a0e1a;border-radius:20px;overflow:hidden;color:#e2e8f0;box-shadow:0 20px 60px rgba(0,0,0,0.6)">
+  <div style="height:4px;background:linear-gradient(90deg,#ef4444,#dc2626,#b91c1c)"></div>
+  <div style="background:linear-gradient(135deg,#450a0a,#7f1d1d);padding:44px 32px;text-align:center">
+    <div style="font-size:44px;margin-bottom:12px">📋</div>
+    <h1 style="margin:0;color:#fff;font-size:28px;font-weight:800">Registration Update</h1>
+    <p style="color:rgba(255,255,255,0.65);font-size:14px;margin:10px 0 0">${displayName}</p>
+  </div>
+  <div style="padding:32px">
+    <p style="font-size:16px;margin:0 0 6px">Hi <strong style="color:#fca5a5">${name}</strong>,</p>
+    <p style="color:#94a3b8;font-size:14px;line-height:1.7;margin:0 0 24px">
+      Thank you for your interest in <strong style="color:#f87171">${displayName}</strong>.
+      After careful review, we regret to inform you that your registration could not be approved at this time.
+    </p>
+    <div style="background:#1c0f0f;border:1px solid rgba(239,68,68,0.3);border-left:4px solid #ef4444;border-radius:12px;padding:20px;margin-bottom:24px">
+      <p style="margin:0 0 6px;color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:1px">Reason for rejection</p>
+      <p style="margin:0;color:#fca5a5;font-size:15px;line-height:1.6">${reason}</p>
+    </div>
+    <p style="color:#64748b;font-size:13px;line-height:1.6;margin:0">
+      If you believe this decision was made in error or have any questions, please reach out to the event organizer directly.
+      We hope to see you at future events!
+    </p>
+  </div>
+  <div style="padding:20px 32px 26px;text-align:center;border-top:1px solid #1e293b">
+    <p style="color:#475569;font-size:12px;margin:0">${APP_NAME} Port &middot; Automated notification</p>
+  </div>
+  <div style="height:4px;background:linear-gradient(90deg,#b91c1c,#dc2626,#ef4444)"></div>
+</div>
+</body>
+</html>`;
+
+      await sendMail(email, `Registration Update — ${displayName} | ${APP_NAME}`, html);
     }
 
     return NextResponse.json({ success: true });

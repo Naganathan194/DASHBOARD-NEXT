@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import dynamic from 'next/dynamic';
+import { getEventDisplayName } from '@/lib/events';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface Doc { _id: string; [key: string]: unknown; }
@@ -18,9 +19,7 @@ const formatKey = (k: string) =>
   k.replace(/([A-Z])/g, ' $1').replace(/[_-]/g, ' ').replace(/\s+/g, ' ').trim()
    .replace(/\b\w/g, (l) => l.toUpperCase());
 
-const formatColName = (n: string) =>
-  n.replace(/([A-Z])/g, ' $1').replace(/[_-]/g, ' ').replace(/\s+/g, ' ').trim()
-   .replace(/\b\w/g, (l) => l.toUpperCase());
+const formatColName = (n: string) => getEventDisplayName(n);
 
 const getDocName = (doc: Doc): string => {
   for (const k of ['fullName', 'firstName', 'candidateName', 'name', 'title', 'email']) {
@@ -687,7 +686,7 @@ export default function Dashboard() {
           </select>
           <select value={state.col} onChange={(e) => onColChange(e.target.value)} disabled={!state.db}>
             <option value="">Select Collection</option>
-            {cols.map((c) => <option key={c} value={c}>{formatColName(c)}</option>)}
+            {cols.map((c) => <option key={c} value={c}>{getEventDisplayName(c)}</option>)}
           </select>
         </div>
         <div className="header-right">
@@ -721,7 +720,7 @@ export default function Dashboard() {
         <div className={`panel${activeTab === 'records' ? ' active' : ''}`} id="panel-records">
           <aside className="sidebar">
             <div className="sidebar-head">
-              <span className="sidebar-title">{state.col ? formatColName(state.col) : 'All Records'}</span>
+              <span className="sidebar-title">{state.col ? getEventDisplayName(state.col) : 'All Records'}</span>
               <span className="badge">{state.filtered.length}</span>
             </div>
             <div style={{ padding: 12, borderBottom: '1px solid var(--border)', display: 'flex', gap: 6 }}>
