@@ -6,7 +6,7 @@ import { getEventDisplayName } from '@/lib/events';
 import { ALLOWED_COLLECTIONS } from '@/lib/registrationCollections';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
-interface Doc { _id: string; [key: string]: unknown; }
+interface Doc { _id: string;[key: string]: unknown; }
 interface Stats { total: number; approved: number; rejected: number; checkedIn: number; pending: number; }
 interface ToastItem { id: number; msg: string; type: 'success' | 'error' | 'info'; }
 interface AppState {
@@ -18,7 +18,7 @@ interface AppState {
 // ── Helpers ────────────────────────────────────────────────────────────────────
 const formatKey = (k: string) =>
   k.replace(/([A-Z])/g, ' $1').replace(/[_-]/g, ' ').replace(/\s+/g, ' ').trim()
-   .replace(/\b\w/g, (l) => l.toUpperCase());
+    .replace(/\b\w/g, (l) => l.toUpperCase());
 
 const formatColName = (n: string) => getEventDisplayName(n);
 
@@ -115,11 +115,11 @@ function StatsGrid({ stats }: { stats: Stats }) {
   return (
     <div className="stats-grid">
       {[
-        { cls: 'total',    icon: 'users',        val: stats.total,     lbl: 'Total'      },
-        { cls: 'approved', icon: 'check-circle',  val: stats.approved,  lbl: 'Approved'   },
-        { cls: 'pending',  icon: 'clock',         val: stats.pending,   lbl: 'Pending'    },
-        { cls: 'rejected', icon: 'times-circle',  val: stats.rejected,  lbl: 'Rejected'   },
-        { cls: 'checked',  icon: 'sign-in-alt',   val: stats.checkedIn, lbl: 'Checked In' },
+        { cls: 'total', icon: 'users', val: stats.total, lbl: 'Total' },
+        { cls: 'approved', icon: 'check-circle', val: stats.approved, lbl: 'Approved' },
+        { cls: 'pending', icon: 'clock', val: stats.pending, lbl: 'Pending' },
+        { cls: 'rejected', icon: 'times-circle', val: stats.rejected, lbl: 'Rejected' },
+        { cls: 'checked', icon: 'sign-in-alt', val: stats.checkedIn, lbl: 'Checked In' },
       ].map((s) => (
         <div key={s.cls} className={`stat-card ${s.cls}`}>
           <div className="stat-icon"><i className={`fas fa-${s.icon}`} /></div>
@@ -143,9 +143,9 @@ function DocDetail({
   onResend?: (id: string) => void;
 }) {
   const [imgSrc, setImgSrc] = useState('');
-  const name     = getDocName(doc);
-  const status   = getDocStatus(doc);
-  const isPending  = !doc.status || doc.status === 'pending';
+  const name = getDocName(doc);
+  const status = getDocStatus(doc);
+  const isPending = !doc.status || doc.status === 'pending';
   const isApproved = doc.status === 'approved';
   const isRejected = doc.status === 'rejected';
 
@@ -271,7 +271,7 @@ function ScannerPanel({ onToast }: { onToast: (m: string, t: 'success' | 'error'
     setScanning(false);
     if (scannerRef.current) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (scannerRef.current as any).stop().catch(() => {});
+      await (scannerRef.current as any).stop().catch(() => { });
       scannerRef.current = null;
     }
   }, []);
@@ -285,12 +285,12 @@ function ScannerPanel({ onToast }: { onToast: (m: string, t: 'success' | 'error'
       { facingMode: 'environment' },
       { fps: 10, qrbox: 250 },
       async (decoded: string) => { await stopScanner(); processScan(decoded); },
-      () => {}
+      () => { }
     ).catch((e: unknown) => {
       onToast('Camera error: ' + String(e), 'error');
       stopScanner();
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stopScanner]);
 
   useEffect(() => { return () => { stopScanner(); }; }, [stopScanner]);
@@ -304,9 +304,9 @@ function ScannerPanel({ onToast }: { onToast: (m: string, t: 'success' | 'error'
     try {
       const r = await api<{ document: Doc; db: string; collection: string }>('POST', '/scan', { qrData: data });
       const doc = serialise(r.document);
-      const name        = getDocName(doc);
-      const email       = getDocEmail(doc);
-      const alreadyIn   = !!doc.checkedIn;
+      const name = getDocName(doc);
+      const email = getDocEmail(doc);
+      const alreadyIn = !!doc.checkedIn;
 
       setScanResult(
         <div className={`scan-result success`}>
@@ -416,6 +416,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(false);
   const [loadingText, setLoadingText] = useState('Loading...');
   const [activeTab, setActiveTab] = useState<'records' | 'scanner'>('records');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [searchQ, setSearchQ] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
@@ -448,7 +449,7 @@ export default function Dashboard() {
   const showLoading = (text = 'Loading...') => { setLoadingText(text); setLoading(true); };
   const hideLoading = () => setLoading(false);
 
-  const openModal  = (m: keyof typeof modals) => setModals((prev) => ({ ...prev, [m]: true }));
+  const openModal = (m: keyof typeof modals) => setModals((prev) => ({ ...prev, [m]: true }));
   const closeModal = (m: keyof typeof modals) => setModals((prev) => ({ ...prev, [m]: false }));
 
   // ── init ──────────────────────────────────────────────────────────────────
@@ -467,10 +468,10 @@ export default function Dashboard() {
   // ── filter ────────────────────────────────────────────────────────────────
   const applyFilter = useCallback((docs: Doc[], q: string, st: string): Doc[] => {
     return docs.filter((d) => {
-      const name  = getDocName(d).toLowerCase();
+      const name = getDocName(d).toLowerCase();
       const email = getDocEmail(d).toLowerCase();
       const matchQ = !q || name.includes(q) || email.includes(q) || String(d.registrationId ?? '').includes(q);
-      const docSt  = getDocStatus(d);
+      const docSt = getDocStatus(d);
       const matchS = !st || docSt === st;
       return matchQ && matchS;
     });
@@ -780,9 +781,12 @@ export default function Dashboard() {
 
       {/* HEADER */}
       <header className="header">
+        <button className="hamburger" onClick={() => setSidebarOpen(true)} aria-label="Open sidebar">
+          <i className="fas fa-bars" />
+        </button>
         <div className="logo">
           <div className="logo-icon"><i className="fas fa-bolt" /></div>
-          EventManager Pro
+          <span className="logo-text">EventManager Pro</span>
         </div>
         <div className="header-selects">
           <div style={{ padding: '8px 12px', borderRadius: 6, background: 'var(--card)', fontSize: 13 }}>
@@ -818,56 +822,64 @@ export default function Dashboard() {
       </nav>
 
       {/* MAIN */}
-      <div className="main">
+      <div className={`main main--${activeTab}`}>
+
+        {/* Global sidebar overlay (mobile) — lives outside panels so it works on any tab */}
+        {sidebarOpen && (
+          <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />
+        )}
+        <aside className={`sidebar${sidebarOpen ? ' open' : ''}`}>
+          <div className="sidebar-head">
+            <span className="sidebar-title">{state.col ? getEventDisplayName(state.col) : 'All Records'}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span className="badge">{state.filtered.length}</span>
+              <button className="sidebar-close" onClick={() => setSidebarOpen(false)} aria-label="Close sidebar">×</button>
+            </div>
+          </div>
+          <div style={{ padding: 12, borderBottom: '1px solid var(--border)', display: 'flex', gap: 6 }}>
+            <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}
+              style={{ flex: 1, minWidth: 0, fontSize: 12, padding: '6px 10px' }}>
+              <option value="">All Status</option>
+              <option value="pending">Pending</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+              <option value="checked_in">Checked In</option>
+            </select>
+          </div>
+          <div className="search-wrap">
+            <input type="text" placeholder="🔍 Search..." value={searchQ} onChange={(e) => setSearchQ(e.target.value)} />
+          </div>
+          <ul className="list">
+            {state.filtered.length === 0 ? (
+              <li className="empty">
+                <i className="fas fa-inbox" /><br />
+                {state.col ? 'No records found' : 'Select a collection'}
+              </li>
+            ) : (
+              state.filtered.map((doc) => {
+                const name = getDocName(doc);
+                const email = getDocEmail(doc);
+                const regId = String(doc.registrationId ?? doc.regId ?? doc.registerNumber ?? '');
+                const docStatus = getDocStatus(doc);
+                const isActive = String(state.selected?._id) === String(doc._id);
+                return (
+                  <li key={String(doc._id)} className={`list-item${isActive ? ' active' : ''}`}
+                    onClick={() => { selectDoc(String(doc._id)); setSidebarOpen(false); }}>
+                    <div className="list-item-name">{name}</div>
+                    {email && <div className="list-item-sub">{email}</div>}
+                    <div className="list-item-meta">
+                      {regId ? <span style={{ fontSize: 11, color: 'var(--muted)' }}>#{regId.substring(0, 10)}</span> : <span />}
+                      <StatusPill status={docStatus} />
+                    </div>
+                  </li>
+                );
+              })
+            )}
+          </ul>
+        </aside>
 
         {/* ── RECORDS PANEL ── */}
         <div className={`panel${activeTab === 'records' ? ' active' : ''}`} id="panel-records">
-          <aside className="sidebar">
-            <div className="sidebar-head">
-              <span className="sidebar-title">{state.col ? getEventDisplayName(state.col) : 'All Records'}</span>
-              <span className="badge">{state.filtered.length}</span>
-            </div>
-            <div style={{ padding: 12, borderBottom: '1px solid var(--border)', display: 'flex', gap: 6 }}>
-              <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}
-                style={{ flex: 1, minWidth: 0, fontSize: 12, padding: '6px 10px' }}>
-                <option value="">All Status</option>
-                <option value="pending">Pending</option>
-                <option value="approved">Approved</option>
-                <option value="rejected">Rejected</option>
-                <option value="checked_in">Checked In</option>
-              </select>
-            </div>
-            <div className="search-wrap">
-              <input type="text" placeholder="🔍 Search..." value={searchQ} onChange={(e) => setSearchQ(e.target.value)} />
-            </div>
-            <ul className="list">
-              {state.filtered.length === 0 ? (
-                <li className="empty">
-                  <i className="fas fa-inbox" /><br />
-                  {state.col ? 'No records found' : 'Select a collection'}
-                </li>
-              ) : (
-                state.filtered.map((doc) => {
-                  const name    = getDocName(doc);
-                  const email   = getDocEmail(doc);
-                  const regId   = String(doc.registrationId ?? doc.regId ?? doc.registerNumber ?? '');
-                  const docStatus = getDocStatus(doc);
-                  const isActive  = String(state.selected?._id) === String(doc._id);
-                  return (
-                    <li key={String(doc._id)} className={`list-item${isActive ? ' active' : ''}`}
-                      onClick={() => selectDoc(String(doc._id))}>
-                      <div className="list-item-name">{name}</div>
-                      {email && <div className="list-item-sub">{email}</div>}
-                      <div className="list-item-meta">
-                        {regId ? <span style={{ fontSize: 11, color: 'var(--muted)' }}>#{regId.substring(0, 10)}</span> : <span />}
-                        <StatusPill status={docStatus} />
-                      </div>
-                    </li>
-                  );
-                })
-              )}
-            </ul>
-          </aside>
 
           <div className="content">
             {stats && <StatsGrid stats={stats} />}
