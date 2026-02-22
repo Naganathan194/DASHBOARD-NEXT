@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { getEventDisplayName } from '@/lib/events';
 import { ALLOWED_COLLECTIONS } from '@/lib/registrationCollections';
@@ -46,14 +47,45 @@ const getDocStatus = (doc: Doc): string =>
 
 // ─── API helper ────────────────────────────────────────────────────────────────
 async function api<T = unknown>(method: string, url: string, body?: unknown): Promise<T> {
-  const opts: RequestInit = { method, headers: { 'Content-Type': 'application/json' } };
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  try {
+    if (typeof window !== 'undefined') {
+      const token = window.localStorage.getItem('authToken');
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const basic = window.localStorage.getItem('basicAuth');
+      if (basic && !headers['Authorization']) headers['Authorization'] = `Basic ${basic}`;
+    }
+  } catch { /* ignore */ }
+  const opts: RequestInit = { method, headers };
   if (body) opts.body = JSON.stringify(body);
   const r = await fetch('/api' + url, opts);
   if (!r.ok) {
     const e = await r.json().catch(() => ({ error: r.statusText }));
-    throw new Error(e.error || r.statusText);
+    const err = new Error(e.error || r.statusText);
+    (err as any).status = r.status;
+    throw err;
   }
   return r.json() as T;
+}
+
+// Centered warning modal used for scanner forbidden scans
+function CenteredWarning({ open, message, onClose }: { open: boolean; message: string; onClose: () => void }) {
+  if (!open) return null;
+  return (
+    <div className="modal-centered" onClick={onClose}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+        <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}><i className="fas fa-exclamation-triangle" style={{ color: 'var(--accent)' }} /> Warning</div>
+        <div style={{ color: 'var(--muted)', marginBottom: 16 }}>{message}</div>
+        <div style={{ textAlign: 'right' }}>
+          <button className="btn btn-primary" onClick={onClose}>OK</button>
+        </div>
+      </div>
+      <style>{`
+        .modal-centered{ position: fixed; inset:0; display:flex; align-items:center; justify-content:center; background: rgba(0,0,0,0.45); z-index: 3000 }
+        .modal-card{ background: var(--card); border: 1px solid var(--border); padding: 20px; border-radius: 12px; width: 90%; max-width: 420px }
+      `}</style>
+    </div>
+  );
 }
 
 // ── Serialise Mongo docs (ObjectId → string) ───────────────────────────────────
@@ -133,7 +165,7 @@ function StatsGrid({ stats }: { stats: Stats }) {
 
 // ── DocDetail ─────────────────────────────────────────────────────────────────
 function DocDetail({
-  doc, onApprove, onOpenReject, onEdit, onDelete, onResend,
+  doc, onApprove, onOpenReject, onEdit, onDelete, onResend, isAdmin,
 }: {
   doc: Doc;
   onApprove: (id: string) => void;
@@ -141,6 +173,7 @@ function DocDetail({
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
   onResend?: (id: string) => void;
+  isAdmin?: boolean;
 }) {
   const [imgSrc, setImgSrc] = useState('');
   const name = getDocName(doc);
@@ -169,7 +202,7 @@ function DocDetail({
             )}
           </div>
           <div className="detail-actions">
-            {isPending && (
+            {isAdmin && isPending && (
               <>
                 <button className="btn btn-success" onClick={() => onApprove(String(doc._id))}>
                   <i className="fas fa-check" /> Approve
@@ -184,7 +217,7 @@ function DocDetail({
                 <i className="fas fa-check-circle" style={{ color: 'var(--green)' }} /> Approved – waiting check-in
               </div>
             )}
-            {isApproved && (
+            {isAdmin && isApproved && (
               <button className="btn btn-ghost btn-sm" onClick={() => onResend && onResend(String(doc._id))} style={{ marginLeft: 8 }}>
                 <i className="fas fa-envelope" /> Resend Email
               </button>
@@ -194,12 +227,16 @@ function DocDetail({
                 <i className="fas fa-times-circle" /> Rejected
               </div>
             )}
-            <button className="btn btn-ghost btn-sm" onClick={() => onEdit(String(doc._id))}>
-              <i className="fas fa-edit" /> Edit
-            </button>
-            <button className="btn btn-ghost btn-sm" style={{ color: 'var(--red)' }} onClick={() => onDelete(String(doc._id))}>
-              <i className="fas fa-trash" />
-            </button>
+            {isAdmin && (
+              <>
+                <button className="btn btn-ghost btn-sm" onClick={() => onEdit(String(doc._id))}>
+                  <i className="fas fa-edit" /> Edit
+                </button>
+                <button className="btn btn-ghost btn-sm" style={{ color: 'var(--red)' }} onClick={() => onDelete(String(doc._id))}>
+                  <i className="fas fa-trash" />
+                </button>
+              </>
+            )}
           </div>
         </div>
 
@@ -265,31 +302,80 @@ function ScannerPanel({ onToast }: { onToast: (m: string, t: 'success' | 'error'
   const [scanning, setScanning] = useState(false);
   const [scanResult, setScanResult] = useState<React.ReactNode>(null);
   const [manualInput, setManualInput] = useState('');
+  const [forbiddenModal, setForbiddenModal] = useState({ open: false, msg: '' });
   const scannerRef = useRef<unknown>(null);
 
   const stopScanner = useCallback(async () => {
     setScanning(false);
-    if (scannerRef.current) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (scannerRef.current as any).stop().catch(() => { });
+    try {
+      if (scannerRef.current) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const inst = scannerRef.current as any;
+        await inst.stop().catch((err: unknown) => { console.warn('scanner stop error', err); });
+        try { await inst.clear().catch(() => {}); } catch {}
+        scannerRef.current = null;
+      }
+    } catch (err) {
+      console.warn('stopScanner error', err);
       scannerRef.current = null;
     }
   }, []);
 
   const startScanner = useCallback(async () => {
     const { Html5Qrcode } = await import('html5-qrcode');
-    setScanning(true);
-    const scanner = new Html5Qrcode('qr-reader');
-    scannerRef.current = scanner;
-    scanner.start(
-      { facingMode: 'environment' },
-      { fps: 10, qrbox: 250 },
-      async (decoded: string) => { await stopScanner(); processScan(decoded); },
-      () => { }
-    ).catch((e: unknown) => {
+    try {
+      setScanning(true);
+      // ensure single instance
+      if (scannerRef.current) {
+        try { await (scannerRef.current as any).stop(); } catch {}
+        scannerRef.current = null;
+      }
+
+      const scanner = new Html5Qrcode('qr-reader', { verbose: false });
+      scannerRef.current = scanner;
+
+      // try to select a rear camera if available
+      let cameraIdOrConfig: any = { facingMode: 'environment' };
+      try {
+        if (typeof (Html5Qrcode as any).getCameras === 'function') {
+          const cams = await (Html5Qrcode as any).getCameras();
+          if (Array.isArray(cams) && cams.length) {
+            // prefer camera labels containing 'back' or 'rear', otherwise use first
+            const back = cams.find((c: any) => /back|rear|environment/i.test(c.label || ''));
+            cameraIdOrConfig = (back && back.id) ? back.id : cams[0].id;
+          }
+        }
+      } catch (e) {
+        console.warn('getCameras failed, falling back to facingMode', e);
+      }
+
+      const onDecode = async (decoded: string, result?: unknown) => {
+        try {
+          console.log('qr decoded:', decoded);
+          // Stop scanner and process result once detected
+          await stopScanner();
+          processScan(decoded);
+        } catch (e) {
+          console.error('onDecode handler error', e);
+        }
+      };
+
+      const onError = (err: unknown) => {
+        // decode attempt failed for a frame - not fatal
+        // keep quiet in production but log for debugging
+        // console.debug('qr decode fail', err);
+      };
+
+      const config = { fps: 10, qrbox: { width: 250, height: 250 } } as any;
+      // Start scanner
+      await scanner.start(cameraIdOrConfig, config, onDecode, onError);
+      console.log('scanner started', cameraIdOrConfig, config);
+    } catch (e: unknown) {
+      console.error('startScanner error', e);
       onToast('Camera error: ' + String(e), 'error');
-      stopScanner();
-    });
+      setScanning(false);
+      try { await stopScanner(); } catch {}
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stopScanner]);
 
@@ -302,10 +388,11 @@ function ScannerPanel({ onToast }: { onToast: (m: string, t: 'success' | 'error'
       </div>
     );
     try {
-      const r = await api<{ document: Doc; db: string; collection: string }>('POST', '/scan', { qrData: data });
+      const r = await api<{ document: Doc; db: string; collection: string; eventName?: string }>('POST', '/scan', { qrData: data });
       const doc = serialise(r.document);
       const name = getDocName(doc);
       const email = getDocEmail(doc);
+      const eventName = r?.eventName || (r?.collection ? getEventDisplayName(r.collection) : '');
       const alreadyIn = !!doc.checkedIn;
 
       setScanResult(
@@ -314,6 +401,7 @@ function ScannerPanel({ onToast }: { onToast: (m: string, t: 'success' | 'error'
             <i className="fas fa-user-circle" style={{ fontSize: 36, color: 'var(--accent)' }} />
             <div>
               <div className="scan-attendee-name">{name}</div>
+              {eventName ? <div style={{ fontSize: 13, color: 'var(--muted)' }}>{eventName}</div> : null}
               {email && <div style={{ fontSize: 13, color: 'var(--muted)' }}>{email}</div>}
             </div>
           </div>
@@ -345,6 +433,13 @@ function ScannerPanel({ onToast }: { onToast: (m: string, t: 'success' | 'error'
         </div>
       );
     } catch (e: unknown) {
+      const err = e as any;
+      if (err && err.status === 403) {
+        // Assigned-event mismatch: show centered warning modal and clear scan result
+        setScanResult(null);
+        setForbiddenModal({ open: true, msg: 'This QR code does not belong to your assigned event.' });
+        return;
+      }
       setScanResult(
         <div className="scan-result error">
           <div style={{ color: 'var(--red)', fontFamily: 'Syne,sans-serif', fontWeight: 700, marginBottom: 8 }}>
@@ -358,10 +453,20 @@ function ScannerPanel({ onToast }: { onToast: (m: string, t: 'success' | 'error'
 
   const doCheckIn = async (id: string, db: string, collection: string, rawData: string) => {
     try {
-      await api('POST', '/checkin', { id, db, collection });
+      // Extract token from raw QR payload when available
+      let token: string | undefined;
+      try { const p = JSON.parse(rawData); token = p?.token; } catch { token = undefined; }
+      await api('POST', '/checkin', { id, db, collection, token });
       onToast('✅ Check-in successful!', 'success');
       await processScan(rawData);
-    } catch (e: unknown) { onToast((e as Error).message, 'error'); }
+    } catch (e: unknown) {
+      const err = e as any;
+      if (err && err.status === 403) {
+        setForbiddenModal({ open: true, msg: 'This QR code does not belong to your assigned event.' });
+        return;
+      }
+      onToast((e as Error).message, 'error');
+    }
   };
 
   const manualScan = async () => {
@@ -377,12 +482,17 @@ function ScannerPanel({ onToast }: { onToast: (m: string, t: 'success' | 'error'
 
       <div className="scanner-box">
         <div className="scanner-head"><i className="fas fa-camera" /> Point camera at attendee QR code</div>
-        <div id="qr-reader" />
-        <div style={{ padding: 16, display: 'flex', gap: 10, justifyContent: 'center' }}>
+
+        <div className="qr-wrapper">
+          <div id="qr-reader" />
+          <div className="qr-overlay" aria-hidden="true" />
+        </div>
+
+        <div className="scanner-controls">
           {!scanning ? (
-            <button className="btn btn-primary" onClick={startScanner}><i className="fas fa-play" /> Start Camera</button>
+            <button className="btn btn-primary start-btn" onClick={startScanner}><i className="fas fa-play" /> Start Camera</button>
           ) : (
-            <button className="btn btn-ghost" onClick={stopScanner}><i className="fas fa-stop" /> Stop</button>
+            <button className="btn btn-ghost stop-btn" onClick={stopScanner}><i className="fas fa-stop" /> Stop</button>
           )}
         </div>
       </div>
@@ -399,25 +509,33 @@ function ScannerPanel({ onToast }: { onToast: (m: string, t: 'success' | 'error'
       </div>
 
       <div style={{ width: '100%', maxWidth: 500 }}>{scanResult}</div>
+      <CenteredWarning open={forbiddenModal.open} message={forbiddenModal.msg} onClose={() => setForbiddenModal({ open: false, msg: '' })} />
     </div>
   );
 }
 
 // ── Dashboard (main) ─────────────────────────────────────────────────────────
 export default function Dashboard() {
+  const router = useRouter();
+  const [userRole, setUserRole] = useState<string | null>(null);
   const [state, setState] = useState<AppState>({
     db: 'test', col: '', docs: [], filtered: [], selected: null, details: null,
     rejectTargetId: null, editingDoc: null, deleteTargetId: null,
   });
   const [dbs, setDbs] = useState<string[]>([]);
   const [cols, setCols] = useState<string[]>([]);
+  const [assignedEvent, setAssignedEvent] = useState<string | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingText, setLoadingText] = useState('Loading...');
   const [activeTab, setActiveTab] = useState<'records' | 'scanner'>('records');
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  
+  
+  const isAdmin = userRole === 'ADMIN';
+  const isViewer = userRole === 'ATTENDEE_VIEWER';
+  const isScanner = userRole === 'SCANNER';
   const [searchQ, setSearchQ] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [rejectReason, setRejectReason] = useState('');
@@ -426,25 +544,47 @@ export default function Dashboard() {
   const autoRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const restoringRef = useRef(false);
   const restoredOnceRef = useRef(false);
-  const savedDbRef = useRef<string | null>(null);
-  const savedColRef = useRef<string | null>(null);
-  const savedFilterRef = useRef<string | null>(null);
-  const savedSearchRef = useRef<string | null>(null);
-  const savedDocRef = useRef<string | null>(null);
 
-  const SESSION_KEYS = {
-    db: 'dashboard:selectedDb',
-    col: 'dashboard:selectedCol',
-    filter: 'dashboard:filterStatus',
-    q: 'dashboard:searchQ',
-    doc: 'dashboard:selectedDocId',
-  } as const;
+  // Centralized persistence key and helpers (sessionStorage)
+  const PERSIST_KEY = 'dashboard:state';
+  type PersistState = { collectionName?: string; selectedStatus?: string; selectedParticipantId?: string | null };
+  const readPersist = (): PersistState | null => {
+    if (typeof window === 'undefined') return null;
+    try { const s = sessionStorage.getItem(PERSIST_KEY); return s ? JSON.parse(s) as PersistState : null; } catch { return null; }
+  };
+  const writePersist = (p: PersistState) => {
+    if (typeof window === 'undefined') return; try { sessionStorage.setItem(PERSIST_KEY, JSON.stringify(p)); } catch { }
+  };
+  const clearPersist = () => { if (typeof window === 'undefined') return; try { sessionStorage.removeItem(PERSIST_KEY); } catch { } };
 
   const toast = useCallback((msg: string, type: 'success' | 'error' | 'info' = 'info') => {
     const id = Date.now();
     setToasts((prev) => [...prev, { id, msg, type }]);
     setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 3500);
   }, []);
+
+  const openUsersModal = () => { router.push('/admin/manage-users'); };
+
+  const logout = () => {
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.removeItem('authToken');
+        window.localStorage.removeItem('basicAuth');
+      }
+    } catch {
+      /* ignore */
+    }
+    try { clearPersist(); } catch {};
+    router.push('/login');
+  };
+
+  const removeUser = async (username: string) => {
+    if (!confirm(`Delete user ${username}?`)) return;
+    try {
+      await api('DELETE', '/admin/users', { username });
+      toast('User deleted', 'info');
+    } catch (e: unknown) { toast((e as Error).message, 'error'); }
+  };
 
   const showLoading = (text = 'Loading...') => { setLoadingText(text); setLoading(true); };
   const hideLoading = () => setLoading(false);
@@ -456,7 +596,44 @@ export default function Dashboard() {
   useEffect(() => {
     (async () => {
       try {
-        await onDbChange('test');
+        // fetch current role
+        let role: string | null = null;
+        let assigned: string | null = null;
+        try {
+          const r = await api<{ user?: { role?: string; assignedEvent?: string } }>('GET', '/auth/me');
+          role = r?.user?.role ? String(r.user.role) : null;
+          setUserRole(role);
+          assigned = r?.user?.assignedEvent ? String(r.user.assignedEvent) : null;
+          setAssignedEvent(assigned);
+          if (role === 'SCANNER') setActiveTab('scanner');
+        } catch {
+          setUserRole(null);
+        }
+        // Redirect unauthenticated users to login
+        if (!role) {
+          router.push('/login');
+          return;
+        }
+        // Load DBs / assigned event
+        if (role === 'ADMIN') {
+          await onDbChange('test');
+        } else if (role === 'ATTENDEE_VIEWER') {
+          // attendee viewers are bound to a single assignedEvent
+          await onDbChange('test');
+          if (assigned) {
+            // automatically select assigned event
+            await onColChange(assigned, 'test');
+            setState((s) => ({ ...s, col: assigned }));
+          }
+        } else if (role === 'SCANNER') {
+          // scanners should not call the collections listing endpoint or fetch docs/stats
+          if (assigned) {
+            // directly select assigned event but do not call onColChange to avoid 403 on protected endpoints
+            setState((s) => ({ ...s, col: assigned }));
+          }
+          // ensure any existing auto-refresh is stopped for scanner role
+          try { stopAutoRefresh(); } catch (e) { /* ignore */ }
+        }
         setConnected(true);
       } catch (e: unknown) {
         setConnected(false);
@@ -481,66 +658,54 @@ export default function Dashboard() {
     setState((prev) => ({ ...prev, filtered: applyFilter(prev.docs, searchQ, filterStatus) }));
   }, [searchQ, filterStatus, applyFilter]);
 
-  // Read stored selections from sessionStorage on mount (client-side only)
+  // Centralized restoration: restore persisted selection after collections are loaded
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const sdb = sessionStorage.getItem(SESSION_KEYS.db);
-      const scol = sessionStorage.getItem(SESSION_KEYS.col);
-      const sfilter = sessionStorage.getItem(SESSION_KEYS.filter);
-      const sq = sessionStorage.getItem(SESSION_KEYS.q);
-      const sd = sessionStorage.getItem(SESSION_KEYS.doc);
-      savedDbRef.current = sdb || null;
-      savedColRef.current = scol || null;
-      savedFilterRef.current = sfilter || null;
-      savedSearchRef.current = sq || null;
-      savedDocRef.current = sd || null;
-    } catch (e) {
-      /* ignore sessionStorage errors */
-    }
-  }, []);
-
-  // After DB list is loaded, restore saved DB/collection and filters once
-  useEffect(() => {
+    if (restoredOnceRef.current) return;
+    if (typeof window === 'undefined') { restoredOnceRef.current = true; return; }
+    if (!cols || cols.length === 0) return;
+    const p = readPersist();
+    if (!p) { restoredOnceRef.current = true; return; }
     (async () => {
-      if (restoredOnceRef.current) return;
-      if (!dbs || dbs.length === 0) return;
-      const wantDb = savedDbRef.current;
-      const wantCol = savedColRef.current;
-      const wantFilter = savedFilterRef.current;
-      const wantQ = savedSearchRef.current;
-      if (!wantDb) { restoredOnceRef.current = true; return; }
-      if (!dbs.includes(wantDb)) { restoredOnceRef.current = true; return; }
+      restoringRef.current = true;
       try {
-        restoringRef.current = true;
-        const returnedCols = await onDbChange(wantDb);
-        if (wantCol && returnedCols && returnedCols.map((c) => c.toLowerCase()).includes(wantCol.toLowerCase())) {
-          const docs = await onColChange(wantCol, wantDb);
-          const wantDoc = savedDocRef.current;
-          if (wantDoc && docs && docs.map((d) => String(d._id)).includes(wantDoc)) {
-            await selectDoc(wantDoc, wantDb, wantCol);
+        const wantCol = p.collectionName;
+        if (wantCol && cols.map((c) => c.toLowerCase()).includes(wantCol.toLowerCase())) {
+          // If current user is a scanner, avoid calling protected endpoints (documents/stats)
+          if (isScanner) {
+            setState((s) => ({ ...s, col: wantCol }));
+          } else {
+            await onColChange(wantCol, state.db);
+            setState((s) => ({ ...s, col: wantCol }));
+            if (p.selectedParticipantId) {
+              // ensure docs are loaded and select participant if present
+              const docs = state.docs && state.docs.length ? state.docs : await loadDocs(state.db, wantCol);
+              if (docs && docs.map((d) => String(d._id)).includes(p.selectedParticipantId)) {
+                await selectDoc(p.selectedParticipantId, state.db, wantCol);
+              }
+            }
           }
         }
-        if (wantFilter != null) setFilterStatus(wantFilter);
-        if (wantQ != null) setSearchQ(wantQ);
+        if (p.selectedStatus != null) setFilterStatus(p.selectedStatus);
       } catch (e) {
-        /* ignore restoration errors */
+        /* ignore */
       } finally {
         restoringRef.current = false;
         restoredOnceRef.current = true;
       }
     })();
-  }, [dbs]);
+  }, [cols]);
 
-  // Persist filters/search to sessionStorage when they change
+  // Centralized persistence: write single JSON blob when relevant state changes
   useEffect(() => {
-    try {
-      if (!restoringRef.current && typeof window !== 'undefined') {
-        sessionStorage.setItem(SESSION_KEYS.filter, filterStatus);
-        sessionStorage.setItem(SESSION_KEYS.q, searchQ);
-      }
-    } catch (e) { /* ignore */ }
-  }, [filterStatus, searchQ]);
+    // Do not write until restoration has completed to avoid overwriting persisted values
+    if (restoringRef.current || typeof window === 'undefined' || !restoredOnceRef.current) return;
+    const toSave: PersistState = {
+      collectionName: state.col || undefined,
+      selectedStatus: filterStatus || undefined,
+      selectedParticipantId: state.selected ? String((state.selected as Doc)._id) : undefined,
+    };
+    try { writePersist(toSave); } catch { }
+  }, [state.col, filterStatus, state.selected]);
 
   // ── DB change ─────────────────────────────────────────────────────────────
   const onDbChange = async (db: string): Promise<string[]> => {
@@ -549,15 +714,14 @@ export default function Dashboard() {
     setCols([]);
     setStats(null);
     if (!db) return [];
+    // Prevent scanners from calling protected collection listing endpoint
+    if (isScanner) return [];
     try {
       const list = await api<string[]>('GET', `/databases/${db}/collections`);
       const lower = new Set(list.map((s) => String(s).toLowerCase()));
       const orderedAllowed = ALLOWED_COLLECTIONS.filter((c) => lower.has(c));
       setCols(orderedAllowed);
-      try {
-        if (!restoringRef.current && typeof window !== 'undefined') sessionStorage.setItem(SESSION_KEYS.db, db);
-        if (!restoringRef.current && typeof window !== 'undefined') sessionStorage.removeItem(SESSION_KEYS.doc);
-      } catch (e) { /* ignore */ }
+      try { /* no-op: persistence handled centrally */ } catch (e) { /* ignore */ }
       return orderedAllowed;
     } catch (e: unknown) { toast((e as Error).message, 'error'); }
     return [];
@@ -567,22 +731,31 @@ export default function Dashboard() {
   const onColChange = async (col: string, dbParam?: string): Promise<Doc[]> => {
     const dbToUse = dbParam ?? state.db;
     stopAutoRefresh();
-    setState((prev) => ({ ...prev, col, selected: null, docs: [] }));
+    setState((prev) => ({ ...prev, col, selected: null, docs: [], filtered: [], details: null, rejectTargetId: null, editingDoc: null, deleteTargetId: null }));
     setStats(null);
-    try {
-      if (!restoringRef.current && typeof window !== 'undefined') sessionStorage.removeItem(SESSION_KEYS.doc);
-    } catch (e) { /* ignore */ }
+    // If clearing selection, also reset search/filter and close modals for a clean blank state
+    if (!col) {
+      setSearchQ('');
+      setFilterStatus('');
+      setModals({ reject: false, doc: false, delete: false });
+    }
+    try { /* no-op: persistence handled centrally */ } catch (e) { /* ignore */ }
     if (!col) return [];
+    // If current user is a scanner, set the collection but avoid fetching protected endpoints
+    if (isScanner) {
+      // don't call loadDocs/loadStats for scanners
+      // Do not start auto-refresh for scanners to avoid fetching full collection documents
+      return [];
+    }
     const docs = await loadDocs(dbToUse, col);
     await loadStats(dbToUse, col);
     startAutoRefresh(dbToUse, col);
-    try {
-      if (!restoringRef.current && typeof window !== 'undefined') sessionStorage.setItem(SESSION_KEYS.col, col);
-    } catch (e) { /* ignore */ }
+    try { /* no-op: persistence handled centrally */ } catch (e) { /* ignore */ }
     return docs ?? [];
   };
 
   const loadDocs = async (db: string, col: string): Promise<Doc[]> => {
+    if (isScanner) return [];
     showLoading('Fetching records...');
     try {
       const docs = (await api<Doc[]>('GET', `/databases/${db}/collections/${col}/documents`)).map(serialise);
@@ -602,6 +775,7 @@ export default function Dashboard() {
   };
 
   const loadStats = async (db: string, col: string) => {
+    if (isScanner) { setStats(null); return; }
     try {
       const s = await api<Stats>('GET', `/databases/${db}/collections/${col}/stats`);
       setStats(s);
@@ -618,11 +792,14 @@ export default function Dashboard() {
     }));
     showLoading('Loading details...');
     try {
-      const doc = serialise(await api<Doc>('GET', `/databases/${dbToUse}/collections/${colToUse}/documents/${id}`));
-      setState((prev) => ({ ...prev, details: doc }));
-      try {
-        if (!restoringRef.current && typeof window !== 'undefined') sessionStorage.setItem(SESSION_KEYS.doc, id);
-      } catch (e) { /* ignore */ }
+      if (isScanner) {
+        // scanners are not allowed to request document details; keep selected summary only
+        setState((prev) => ({ ...prev, details: null }));
+      } else {
+        const doc = serialise(await api<Doc>('GET', `/databases/${dbToUse}/collections/${colToUse}/documents/${id}`));
+        setState((prev) => ({ ...prev, details: doc }));
+      }
+      try { /* persistence handled centrally */ } catch (e) { /* ignore */ }
     } catch (e: unknown) { toast((e as Error).message, 'error'); }
     finally { hideLoading(); }
   };
@@ -732,23 +909,70 @@ export default function Dashboard() {
   // ── export ────────────────────────────────────────────────────────────────
   const exportExcel = async () => {
     const XLSX = await import('xlsx');
-    const docs = state.docs;
-    if (!docs.length) return;
-    const keys = Object.keys(docs[0]).filter((k) => !isImageKey(k));
-    const rows = [keys.map(formatKey), ...docs.map((d) => keys.map((k) => {
-      const v = d[k];
-      if (v == null) return '';
-      if (typeof v === 'object') return JSON.stringify(v);
-      return String(v);
-    }))];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), state.col.substring(0, 31));
-    XLSX.writeFile(wb, `${state.col}_${new Date().toISOString().split('T')[0]}.xlsx`);
-    toast('Exported successfully', 'success');
+    // If a collection is selected, keep existing behavior
+    if (state.col) {
+      const docs = state.docs;
+      if (!docs.length) { toast('No records to export', 'info'); return; }
+      const keys = Object.keys(docs[0]).filter((k) => !isImageKey(k));
+      const rows = [keys.map(formatKey), ...docs.map((d) => keys.map((k) => {
+        const v = d[k];
+        if (v == null) return '';
+        if (typeof v === 'object') return JSON.stringify(v);
+        return String(v);
+      }))];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), state.col.substring(0, 31));
+      XLSX.writeFile(wb, `${state.col}_${new Date().toISOString().split('T')[0]}.xlsx`);
+      toast('Exported successfully', 'success');
+      return;
+    }
+
+    // No collection selected: fetch all allowed collections and merge into one sheet
+    try {
+      const allDocs: Doc[] = [];
+      for (const col of ALLOWED_COLLECTIONS) {
+        try {
+          const docs = (await api<Doc[]>('GET', `/databases/${state.db}/collections/${col}/documents`)).map(serialise);
+          // attach event/collection display name to each row for later
+          const eventName = getEventDisplayName(col) || col;
+          docs.forEach((d) => { (d as any).__eventName = eventName; allDocs.push(d); });
+        } catch (e: unknown) {
+          // skip collections we cannot fetch, but notify the user
+          toast(`Could not fetch ${col}: ${(e as Error).message}`, 'error');
+        }
+      }
+      if (!allDocs.length) { toast('No records to export', 'info'); return; }
+
+      // build a consistent header set across all docs
+      const keysSet = new Set<string>();
+      allDocs.forEach((d) => Object.keys(d).forEach((k) => { if (!isImageKey(k)) keysSet.add(k); }));
+      // ensure our synthetic event name column is first and has a friendly header
+      keysSet.delete('__eventName');
+      const keys = ['__eventName', ...Array.from(keysSet)];
+      const headerRow = keys.map((k) => (k === '__eventName' ? 'Event Name' : formatKey(k)));
+
+      const rows = [headerRow, ...allDocs.map((d) => keys.map((k) => {
+        const v = (d as any)[k];
+        if (v == null) return '';
+        if (typeof v === 'object') return JSON.stringify(v);
+        return String(v);
+      }))];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'Registrations');
+      XLSX.writeFile(wb, `all_events_${new Date().toISOString().split('T')[0]}.xlsx`);
+      toast('Exported successfully', 'success');
+    } catch (e: unknown) {
+      toast((e as Error).message, 'error');
+    }
   };
 
   // ── auto refresh ──────────────────────────────────────────────────────────
   const startAutoRefresh = (db: string, col: string) => {
+    // Do not start auto-refresh for scanner role
+    if (isScanner) return;
+    // ensure any previous interval is cleared
+    if (autoRefreshRef.current) { clearInterval(autoRefreshRef.current); autoRefreshRef.current = null; }
     autoRefreshRef.current = setInterval(async () => {
       if (!db || !col) return;
       try {
@@ -772,8 +996,46 @@ export default function Dashboard() {
   useEffect(() => { return () => stopAutoRefresh(); }, []);
 
   const colHasData = !!state.col && state.docs.length > 0;
+  const exportDisabled = state.col ? !colHasData : !(cols && cols.length > 0);
+
+  const allowedTabs = (() => {
+    if (isScanner) return ['scanner'] as const;
+    if (isViewer) return ['records'] as const;
+    return ['records', 'scanner'] as const;
+  })();
 
   // ── render ────────────────────────────────────────────────────────────────
+  // Results list component (rendered in sidebar on desktop, in main on mobile)
+  const ResultsList = () => (
+    <ul className="list">
+      {state.filtered.length === 0 ? (
+        <li className="empty">
+          <i className="fas fa-inbox" /><br />
+          {state.col ? 'No records found' : 'Select a collection'}
+        </li>
+      ) : (
+        state.filtered.map((doc) => {
+          const name = getDocName(doc);
+          const email = getDocEmail(doc);
+          const regId = String(doc.registrationId ?? doc.regId ?? doc.registerNumber ?? '');
+          const docStatus = getDocStatus(doc);
+          const isActive = String(state.selected?._id) === String(doc._id);
+          return (
+            <li key={String(doc._id)} className={`list-item${isActive ? ' active' : ''}`}
+              onClick={() => { selectDoc(String(doc._id)); }}>
+              <div className="list-item-name">{name}</div>
+              {email && <div className="list-item-sub">{email}</div>}
+              <div className="list-item-meta">
+                {regId ? <span style={{ fontSize: 11, color: 'var(--muted)' }}>#{regId.substring(0, 10)}</span> : <span />}
+                <StatusPill status={docStatus} />
+              </div>
+            </li>
+          );
+        })
+      )}
+    </ul>
+  );
+
   return (
     <>
       <LoadingOverlay show={loading} text={loadingText} />
@@ -781,39 +1043,81 @@ export default function Dashboard() {
 
       {/* HEADER */}
       <header className="header">
-        <button className="hamburger" onClick={() => setSidebarOpen(true)} aria-label="Open sidebar">
-          <i className="fas fa-bars" />
-        </button>
         <div className="logo">
           <div className="logo-icon"><i className="fas fa-bolt" /></div>
           <span className="logo-text">EventManager Pro</span>
         </div>
-        <div className="header-selects">
-          <div style={{ padding: '8px 12px', borderRadius: 6, background: 'var(--card)', fontSize: 13 }}>
-            Database: <strong style={{ marginLeft: 6 }}>test</strong>
+        {isAdmin ? (
+          <div className="header-selects">
+            <div style={{ padding: '8px 12px', borderRadius: 6, background: 'var(--card)', fontSize: 13 }}>
+              Database: <strong style={{ marginLeft: 6 }}>test</strong>
+            </div>
+            <select value={state.col} onChange={(e) => onColChange(e.target.value)} disabled={!state.db}>
+              <option value="">Select Collection</option>
+              {cols.map((c) => <option key={c} value={c}>{getEventDisplayName(c)}</option>)}
+            </select>
           </div>
-          <select value={state.col} onChange={(e) => onColChange(e.target.value)} disabled={!state.db}>
-            <option value="">Select Collection</option>
-            {cols.map((c) => <option key={c} value={c}>{getEventDisplayName(c)}</option>)}
-          </select>
-        </div>
+        ) : isViewer ? (
+          <div className="header-selects">
+            <div style={{ padding: '8px 12px', borderRadius: 6, background: 'var(--card)', fontSize: 13 }}>
+              Database: <strong style={{ marginLeft: 6 }}>test</strong>
+            </div>
+            <div style={{ padding: '8px 12px', borderRadius: 6, background: 'var(--card)', fontSize: 13 }}>
+              Event: <strong style={{ marginLeft: 6 }}>{assignedEvent || '—'}</strong>
+            </div>
+          </div>
+        ) : null}
+        <style>{`
+          .desktop-only { display: block; }
+          .mobile-only { display: none; }
+          @media (max-width: 768px) {
+            .desktop-only { display: none !important; }
+            .mobile-only { display: block !important; }
+          }
+
+          /* Stats grid responsive behavior: auto-fit on desktop, single column on mobile */
+          .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; align-items: stretch; }
+          .stats-grid .stat-card { padding: 12px; border-radius: 8px; background: var(--card); box-shadow: none; width: 100%; box-sizing: border-box; }
+          @media (max-width: 768px) {
+            /* Mobile: first card full width, remaining 4 cards in a single row */
+            .stats-grid { grid-template-columns: repeat(4, 1fr) !important; gap: 10px; }
+            .stats-grid .stat-card { width: 100% !important; }
+            .stats-grid .stat-card:first-child { grid-column: 1 / -1; justify-self: center; }
+            /* ensure the remaining cards shrink if needed to avoid overflow */
+            .stats-grid .stat-card { min-width: 0; }
+          }
+
+          /* Ensure lists don't overflow on mobile */
+          .list { margin: 0; padding: 0; list-style: none; }
+          .list .list-item { box-sizing: border-box; }
+        `}</style>
         <div className="header-right">
-          <button className="btn btn-ghost btn-sm" onClick={exportExcel} disabled={!colHasData}>
-            <i className="fas fa-download" /> Export
-          </button>
-          <button className="btn btn-primary btn-sm" onClick={openAddModal} disabled={!state.col}>
-            <i className="fas fa-plus" /> Add
-          </button>
+          {isAdmin && (
+            <>
+              <button className="btn btn-ghost btn-sm" onClick={exportExcel} disabled={exportDisabled}>
+                <i className="fas fa-download" /> Export
+              </button>
+              <button className="btn btn-primary btn-sm" onClick={openAddModal} disabled={!state.col}>
+                <i className="fas fa-plus" /> Add
+              </button>
+              <button className="btn btn-ghost btn-sm" onClick={openUsersModal} style={{ marginLeft: 8 }}>
+                <i className="fas fa-users-cog" /> Users
+              </button>
+            </>
+          )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--muted)' }}>
             <div className={`status-dot ${connected ? 'connected' : 'disconnected'}`} />
             <span>{connected ? 'Connected' : 'Disconnected'}</span>
           </div>
+          <button className="btn btn-ghost btn-sm" onClick={logout} style={{ marginLeft: 8 }}>
+            <i className="fas fa-sign-out-alt" /> Logout
+          </button>
         </div>
       </header>
 
       {/* NAV TABS */}
       <nav className="nav-tabs">
-        {(['records', 'scanner'] as const).map((tab) => (
+        {allowedTabs.map((tab) => (
           <button key={tab} className={`nav-tab${activeTab === tab ? ' active' : ''}`} onClick={() => setActiveTab(tab)}>
             <i className={`fas fa-${tab === 'records' ? 'table' : 'qrcode'}`} />
             {tab === 'records' ? 'Records' : 'QR Scanner'}
@@ -824,83 +1128,79 @@ export default function Dashboard() {
       {/* MAIN */}
       <div className={`main main--${activeTab}`}>
 
-        {/* Global sidebar overlay (mobile) — lives outside panels so it works on any tab */}
-        {sidebarOpen && (
-          <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />
-        )}
-        <aside className={`sidebar${sidebarOpen ? ' open' : ''}`}>
-          <div className="sidebar-head">
-            <span className="sidebar-title">{state.col ? getEventDisplayName(state.col) : 'All Records'}</span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span className="badge">{state.filtered.length}</span>
-              <button className="sidebar-close" onClick={() => setSidebarOpen(false)} aria-label="Close sidebar">×</button>
+          {/* Desktop inline sidebar content (no drawer) */}
+          {!isScanner && (
+            <div className="sidebar-inline desktop-only" style={{ width: 320, flexShrink: 0 }}>
+              <div className="sidebar-head">
+                <span className="sidebar-title">{state.col ? getEventDisplayName(state.col) : 'All Records'}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span className="badge">{state.filtered.length}</span>
+                </div>
+              </div>
+              <div style={{ padding: 12, borderBottom: '1px solid var(--border)', display: 'flex', gap: 6 }}>
+                <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}
+                  style={{ flex: 1, minWidth: 0, fontSize: 12, padding: '6px 10px' }}>
+                  <option value="">All Status</option>
+                  <option value="pending">Pending</option>
+                  <option value="approved">Approved</option>
+                  <option value="rejected">Rejected</option>
+                  <option value="checked_in">Checked In</option>
+                </select>
+              </div>
+              <div className="search-wrap">
+                <input type="text" placeholder="🔍 Search..." value={searchQ} onChange={(e) => setSearchQ(e.target.value)} />
+              </div>
+              <ResultsList />
             </div>
-          </div>
-          <div style={{ padding: 12, borderBottom: '1px solid var(--border)', display: 'flex', gap: 6 }}>
-            <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}
-              style={{ flex: 1, minWidth: 0, fontSize: 12, padding: '6px 10px' }}>
-              <option value="">All Status</option>
-              <option value="pending">Pending</option>
-              <option value="approved">Approved</option>
-              <option value="rejected">Rejected</option>
-              <option value="checked_in">Checked In</option>
-            </select>
-          </div>
-          <div className="search-wrap">
-            <input type="text" placeholder="🔍 Search..." value={searchQ} onChange={(e) => setSearchQ(e.target.value)} />
-          </div>
-          <ul className="list">
-            {state.filtered.length === 0 ? (
-              <li className="empty">
-                <i className="fas fa-inbox" /><br />
-                {state.col ? 'No records found' : 'Select a collection'}
-              </li>
-            ) : (
-              state.filtered.map((doc) => {
-                const name = getDocName(doc);
-                const email = getDocEmail(doc);
-                const regId = String(doc.registrationId ?? doc.regId ?? doc.registerNumber ?? '');
-                const docStatus = getDocStatus(doc);
-                const isActive = String(state.selected?._id) === String(doc._id);
-                return (
-                  <li key={String(doc._id)} className={`list-item${isActive ? ' active' : ''}`}
-                    onClick={() => { selectDoc(String(doc._id)); setSidebarOpen(false); }}>
-                    <div className="list-item-name">{name}</div>
-                    {email && <div className="list-item-sub">{email}</div>}
-                    <div className="list-item-meta">
-                      {regId ? <span style={{ fontSize: 11, color: 'var(--muted)' }}>#{regId.substring(0, 10)}</span> : <span />}
-                      <StatusPill status={docStatus} />
-                    </div>
-                  </li>
-                );
-              })
-            )}
-          </ul>
-        </aside>
+          )}
+
+        
 
         {/* ── RECORDS PANEL ── */}
         <div className={`panel${activeTab === 'records' ? ' active' : ''}`} id="panel-records">
 
           <div className="content">
             {stats && <StatsGrid stats={stats} />}
+            {/* Mobile: place filters below stats and results below filters */}
+            {(isAdmin || isViewer) && (
+              <div className="mobile-only" style={{ padding: '12px 0' }}>
+                <div style={{ marginBottom: 8 }}>
+                  <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}
+                    style={{ width: '100%', fontSize: 12, padding: '8px 10px', borderRadius: 6 }}>
+                    <option value="">All Status</option>
+                    <option value="pending">Pending</option>
+                    <option value="approved">Approved</option>
+                    <option value="rejected">Rejected</option>
+                    <option value="checked_in">Checked In</option>
+                  </select>
+                </div>
+                <div>
+                  <input type="text" className="form-input" placeholder="🔍 Search..." value={searchQ} onChange={(e) => setSearchQ(e.target.value)} />
+                </div>
+              </div>
+            )}
+            <div className="mobile-only" style={{ paddingTop: 12 }}>
+              <ResultsList />
+            </div>
             {state.details ? (
-              <DocDetail
-                doc={state.details}
-                onApprove={approveDoc}
-                onOpenReject={openRejectModal}
-                onEdit={openEditModal}
-                onDelete={openDeleteModal}
-                onResend={async (id: string) => {
-                  showLoading('Resending email...');
-                  try {
-                    await api('POST', `/databases/${state.db}/collections/${state.col}/documents/${id}/resend`);
-                    toast('Email resent to attendee.', 'success');
-                    await loadDocs(state.db, state.col);
-                    await selectDoc(id);
-                  } catch (e: unknown) { toast((e as Error).message, 'error'); }
-                  finally { hideLoading(); }
-                }}
-              />
+                <DocDetail
+                  doc={state.details}
+                  onApprove={approveDoc}
+                  onOpenReject={openRejectModal}
+                  onEdit={openEditModal}
+                  onDelete={openDeleteModal}
+                  onResend={async (id: string) => {
+                    showLoading('Resending email...');
+                    try {
+                      await api('POST', `/databases/${state.db}/collections/${state.col}/documents/${id}/resend`);
+                      toast('Email resent to attendee.', 'success');
+                      await loadDocs(state.db, state.col);
+                      await selectDoc(id);
+                    } catch (e: unknown) { toast((e as Error).message, 'error'); }
+                    finally { hideLoading(); }
+                  }}
+                  isAdmin={isAdmin}
+                />
             ) : !state.col ? (
               <div className="placeholder">
                 <div className="placeholder-icon"><i className="fas fa-database" /></div>
@@ -977,6 +1277,7 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+      {/* Users are managed on a dedicated page: /admin/manage-users */}
     </>
   );
 }

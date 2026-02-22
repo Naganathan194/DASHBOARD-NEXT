@@ -1,13 +1,18 @@
 import { NextResponse } from 'next/server';
 import { connectToMongo } from '@/lib/mongodb';
 import { isAllowedCollection } from '@/lib/registrationCollections';
+import { authorize, ROLES, assertAssignedEvent } from '@/lib/auth';
 
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ db: string; col: string }> }
 ) {
+  const authCheck = await authorize(_req, [ROLES.ADMIN, ROLES.ATTENDEE_VIEWER]);
+  if (authCheck instanceof NextResponse) return authCheck;
   const { db, col } = await params;
   if (!isAllowedCollection(col)) return NextResponse.json({ error: 'Collection not allowed' }, { status: 404 });
+  const assignedCheck = assertAssignedEvent(authCheck as Record<string, unknown>, col);
+  if (assignedCheck instanceof NextResponse) return assignedCheck;
   try {
     const client = await connectToMongo();
     const docs = await client.db(db).collection(col).find({}).limit(500).toArray();

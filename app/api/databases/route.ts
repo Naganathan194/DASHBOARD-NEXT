@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server';
 import { connectToMongo } from '@/lib/mongodb';
+import { authorize, ROLES } from '@/lib/auth';
 
-export async function GET() {
+export async function GET(req: Request) {
+  const authCheck = await authorize(req, [ROLES.ADMIN]);
+  if (authCheck instanceof NextResponse) return authCheck;
   try {
     const client = await connectToMongo();
     const dbs = await client.db().admin().listDatabases();

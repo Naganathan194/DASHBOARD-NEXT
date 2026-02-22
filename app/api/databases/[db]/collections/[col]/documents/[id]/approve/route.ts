@@ -6,6 +6,7 @@ import { isAllowedCollection } from '@/lib/registrationCollections';
 import { ObjectId, Filter, Document } from 'mongodb';
 import QRCode from 'qrcode';
 import crypto from 'crypto';
+import { authorize, ROLES } from '@/lib/auth';
 
 function buildQuery(id: string): Filter<Document> {
   try { return { _id: new ObjectId(id) }; } catch { return { _id: id } as unknown as Filter<Document>; }
@@ -22,10 +23,10 @@ function detailRow(label: string, value: string): string {
   if (!value || value.trim() === '') return '';
   return `
     <tr>
-      <td style="padding:10px 16px 10px 0;border-bottom:1px solid #1e293b;color:#64748b;font-size:13px;white-space:nowrap;vertical-align:top;width:42%">
+      <td style="padding:10px 16px 10px 0;border-bottom:1px solid #1e293b;color:#64748b;font-size:13px;vertical-align:top;max-width:42%;display:inline-block;word-break:break-word;overflow-wrap:break-word;">
         ${label}
       </td>
-      <td style="padding:10px 0;border-bottom:1px solid #1e293b;color:#e2e8f0;font-size:14px;font-weight:500">
+      <td style="padding:10px 0;border-bottom:1px solid #1e293b;color:#e2e8f0;font-size:14px;font-weight:500;vertical-align:top;max-width:58%;display:inline-block;word-break:break-word;overflow-wrap:break-word;">
         ${value}
       </td>
     </tr>`;
@@ -36,7 +37,10 @@ export async function POST(
   { params }: { params: Promise<{ db: string; col: string; id: string }> }
 ) {
   const params_ = await params;
-    if (!isAllowedCollection(params_.col)) return NextResponse.json({ error: 'Collection not allowed' }, { status: 404 });
+  // require admin
+  const authCheck = await authorize(_req, [ROLES.ADMIN]);
+  if (authCheck instanceof NextResponse) return authCheck;
+  if (!isAllowedCollection(params_.col)) return NextResponse.json({ error: 'Collection not allowed' }, { status: 404 });
   try {
     const client = await connectToMongo();
     const query = buildQuery(params_.id);
@@ -138,7 +142,18 @@ export async function POST(
       const html = `
 <!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    /* Mobile-first overrides for email clients that support media queries */
+    @media only screen and (max-width:480px) {
+      .details-table td { display:block !important; width:100% !important; padding:8px 0 !important; box-sizing:border-box; }
+      .details-table td:first-child { padding-right:0 !important; }
+      .detail-row td { display:block !important; width:100% !important; }
+    }
+  </style>
+</head>
 <body style="margin:0;padding:24px 0;background:#060a14;font-family:'Segoe UI',Arial,sans-serif">
 <div style="max-width:620px;margin:0 auto;background:#0a0e1a;border-radius:24px;overflow:hidden;color:#e2e8f0;box-shadow:0 30px 80px rgba(0,0,0,0.7)">
 
@@ -192,7 +207,7 @@ export async function POST(
       <h3 style="margin:0 0 20px;color:#60a5fa;font-size:13px;text-transform:uppercase;letter-spacing:1.5px;font-weight:800">
         ✦ Your Registration Details
       </h3>
-      <table style="width:100%;border-collapse:collapse">
+      <table class="details-table" style="width:100%;border-collapse:collapse">
         ${detailsHtml}
       </table>
     </div>

@@ -4,6 +4,7 @@ import { sendMail, APP_NAME } from '@/lib/mail';
 import { getEventDisplayName } from '@/lib/events';
 import { isAllowedCollection } from '@/lib/registrationCollections';
 import { ObjectId, Filter, Document } from 'mongodb';
+import { authorize, ROLES } from '@/lib/auth';
 
 function buildQuery(id: string): Filter<Document> {
   try { return { _id: new ObjectId(id) }; } catch { return { _id: id } as unknown as Filter<Document>; }
@@ -14,7 +15,10 @@ export async function POST(
   { params }: { params: Promise<{ db: string; col: string; id: string }> }
 ) {
   const { db, col, id } = await params;
-    if (!isAllowedCollection(col)) return NextResponse.json({ error: 'Collection not allowed' }, { status: 404 });
+  // require admin
+  const authCheck = await authorize(req, [ROLES.ADMIN]);
+  if (authCheck instanceof NextResponse) return authCheck;
+  if (!isAllowedCollection(col)) return NextResponse.json({ error: 'Collection not allowed' }, { status: 404 });
   try {
     const { reason } = await req.json();
     if (!reason) return NextResponse.json({ error: 'Reason required' }, { status: 400 });
