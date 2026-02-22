@@ -522,6 +522,10 @@ function ScannerPanel({
     msg: "",
   });
   const scannerRef = useRef<unknown>(null);
+  // Prevents duplicate processing while a scan API call is in-flight
+  const processingRef = useRef(false);
+  // Ref for the result section – used to auto-scroll after a scan
+  const scanResultRef = useRef<HTMLDivElement>(null);
 
   const stopScanner = useCallback(async () => {
     setScanning(false);
@@ -576,13 +580,20 @@ function ScannerPanel({
       }
 
       const onDecode = async (decoded: string, result?: unknown) => {
+        // Ignore rapid duplicate callbacks while a scan is already processing
+        if (processingRef.current) return;
+        processingRef.current = true;
         try {
           console.log("qr decoded:", decoded);
-          // Stop scanner and process result once detected
-          await stopScanner();
-          processScan(decoded);
+          // Process but keep camera running
+          await processScan(decoded);
         } catch (e) {
           console.error("onDecode handler error", e);
+        } finally {
+          // Unlock after a short delay so the same QR isn't re-scanned immediately
+          setTimeout(() => {
+            processingRef.current = false;
+          }, 2500);
         }
       };
 
@@ -624,7 +635,17 @@ function ScannerPanel({
     };
   }, [startScanner]);
 
-  const processScan = async (data: string) => {
+  // Auto-scroll to result whenever it changes
+  useEffect(() => {
+    if (scanResult && scanResultRef.current) {
+      scanResultRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }
+  }, [scanResult]);
+
+  const processScan = async (data: string): Promise<void> => {
     setScanResult(
       <div style={{ textAlign: "center", padding: 24 }}>
         <div className="spinner" style={{ margin: "auto" }} />
@@ -880,7 +901,9 @@ function ScannerPanel({
         </button>
       </div>
 
-      <div style={{ width: "100%", maxWidth: 500 }}>{scanResult}</div>
+      <div ref={scanResultRef} style={{ width: "100%", maxWidth: 500 }}>
+        {scanResult}
+      </div>
       <CenteredWarning
         open={forbiddenModal.open}
         message={forbiddenModal.msg}
