@@ -9,7 +9,7 @@ export const ROLES = {
 
 type Role = (typeof ROLES)[keyof typeof ROLES];
 
-const SECRET = process.env.JWT_SECRET || process.env.APP_NAME || 'eventmanager-secret';
+const SECRET = process.env.JWT_SECRET || 'eventmanager-secret';
 
 function base64Url(input: string | Buffer) {
   return Buffer.from(input).toString('base64').replace(/=+$/g, '').replace(/\+/g, '-').replace(/\//g, '_');
