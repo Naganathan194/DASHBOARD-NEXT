@@ -196,7 +196,7 @@ export default function ManageUsersPage() {
           <h2 style={{ margin: 0 }}>Manage Users</h2>
           <button
             className="btn btn-ghost btn-back"
-            onClick={() => router.push("/")}
+            onClick={() => router.back()}
           >
             Back
           </button>

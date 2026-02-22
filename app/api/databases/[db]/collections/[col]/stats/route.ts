@@ -16,13 +16,23 @@ export async function GET(
   try {
     const client = await connectToMongo();
     const col = client.db(db).collection(colName);
-    const [total, approved, rejected, checkedIn, pending] = await Promise.all([
-      col.countDocuments(),
-      col.countDocuments({ status: 'approved' }),
-      col.countDocuments({ status: 'rejected' }),
-      col.countDocuments({ checkedIn: true }),
-      col.countDocuments({ status: 'pending' }),
-    ]);
+    const agg = await col
+      .aggregate([
+        {
+          $group: {
+            _id: null,
+            total: { $sum: 1 },
+            approved: { $sum: { $cond: [{ $eq: ['$status', 'approved'] }, 1, 0] } },
+            rejected: { $sum: { $cond: [{ $eq: ['$status', 'rejected'] }, 1, 0] } },
+            pending: { $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] } },
+            checkedIn: { $sum: { $cond: [{ $eq: ['$checkedIn', true] }, 1, 0] } },
+          },
+        },
+      ])
+      .toArray();
+
+    const stats = agg[0] ?? { total: 0, approved: 0, rejected: 0, checkedIn: 0, pending: 0 };
+    const { total, approved, rejected, checkedIn, pending } = stats as Record<string, number>;
     return NextResponse.json({ total, approved, rejected, checkedIn, pending });
   } catch (e: unknown) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });

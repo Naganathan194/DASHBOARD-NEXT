@@ -954,6 +954,17 @@ export default function Dashboard() {
   const restoringRef = useRef(false);
   const restoredOnceRef = useRef(false);
 
+  // ── URL sync helper ────────────────────────────────────────────────────────
+  // Shallow-updates browser URL query params without Next.js navigation or
+  // component re-mount. All navigation actions call this to keep URL in sync.
+  const pushUrl = (col: string | null, docId: string | null) => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    col ? url.searchParams.set("col", col) : url.searchParams.delete("col");
+    docId ? url.searchParams.set("id", docId) : url.searchParams.delete("id");
+    window.history.replaceState(null, "", url.toString());
+  };
+
   // Centralized persistence key and helpers (sessionStorage)
   const PERSIST_KEY = "dashboard:state";
   type PersistState = {
@@ -961,11 +972,20 @@ export default function Dashboard() {
     selectedStatus?: string;
     selectedParticipantId?: string | null;
   };
+  // Session storage TTL: 10 minutes
+  const PERSIST_TTL_MS = 10 * 60 * 1000;
   const readPersist = (): PersistState | null => {
     if (typeof window === "undefined") return null;
     try {
       const s = sessionStorage.getItem(PERSIST_KEY);
-      return s ? (JSON.parse(s) as PersistState) : null;
+      if (!s) return null;
+      const parsed = JSON.parse(s) as PersistState & { _ts?: number };
+      // Expire after 10 minutes
+      if (parsed._ts && Date.now() - parsed._ts > PERSIST_TTL_MS) {
+        sessionStorage.removeItem(PERSIST_KEY);
+        return null;
+      }
+      return parsed;
     } catch {
       return null;
     }
@@ -973,7 +993,10 @@ export default function Dashboard() {
   const writePersist = (p: PersistState) => {
     if (typeof window === "undefined") return;
     try {
-      sessionStorage.setItem(PERSIST_KEY, JSON.stringify(p));
+      sessionStorage.setItem(
+        PERSIST_KEY,
+        JSON.stringify({ ...p, _ts: Date.now() }),
+      );
     } catch {}
   };
   const clearPersist = () => {
@@ -1004,6 +1027,8 @@ export default function Dashboard() {
       if (typeof window !== "undefined") {
         window.localStorage.removeItem("authToken");
         window.localStorage.removeItem("basicAuth");
+        // Clear all session storage on logout
+        sessionStorage.clear();
       }
     } catch {
       /* ignore */
@@ -1011,7 +1036,8 @@ export default function Dashboard() {
     try {
       clearPersist();
     } catch {}
-    router.push("/login");
+    pushUrl(null, null);
+    router.replace("/login");
   };
 
   const removeUser = async (username: string) => {
@@ -1061,27 +1087,37 @@ export default function Dashboard() {
           router.push("/login");
           return;
         }
+
+        // Read URL params – these take priority for state restoration
+        const urlParams =
+          typeof window !== "undefined"
+            ? new URLSearchParams(window.location.search)
+            : null;
+        const urlCol = urlParams?.get("col") || null;
+        const urlId = urlParams?.get("id") || null;
+
         // Load DBs / assigned event
         if (role === "ADMIN") {
           await onDbChange("test");
+          // Restore from URL when params are present (on refresh / direct link)
+          if (urlCol) {
+            await onColChange(urlCol, "test");
+            if (urlId) await selectDoc(urlId, "test", urlCol);
+          }
         } else if (role === "ATTENDEE_VIEWER") {
-          // attendee viewers are bound to a single assignedEvent
           await onDbChange("test");
           if (assigned) {
-            // automatically select assigned event
             await onColChange(assigned, "test");
             setState((s) => ({ ...s, col: assigned }));
+            if (urlId) await selectDoc(urlId, "test", assigned!);
           }
         } else if (role === "SCANNER") {
-          // scanners should not call the collections listing endpoint or fetch docs/stats
           if (assigned) {
-            // directly select assigned event but do not call onColChange to avoid 403 on protected endpoints
             setState((s) => ({ ...s, col: assigned }));
           }
-          // ensure any existing auto-refresh is stopped for scanner role
           try {
             stopAutoRefresh();
-          } catch (e) {
+          } catch {
             /* ignore */
           }
         }
@@ -1247,27 +1283,15 @@ export default function Dashboard() {
       setSearchQ("");
       setFilterStatus("");
       setModals({ reject: false, doc: false, delete: false });
-    }
-    try {
-      /* no-op: persistence handled centrally */
-    } catch (e) {
-      /* ignore */
-    }
-    if (!col) return [];
-    // If current user is a scanner, set the collection but avoid fetching protected endpoints
-    if (isScanner) {
-      // don't call loadDocs/loadStats for scanners
-      // Do not start auto-refresh for scanners to avoid fetching full collection documents
+      pushUrl(null, null);
       return [];
     }
+    // Update URL – collection selected, no participant yet
+    pushUrl(col, null);
+    if (isScanner) return [];
     const docs = await loadDocs(dbToUse, col);
     await loadStats(dbToUse, col);
     startAutoRefresh(dbToUse, col);
-    try {
-      /* no-op: persistence handled centrally */
-    } catch (e) {
-      /* ignore */
-    }
     return docs ?? [];
   };
 
@@ -1312,8 +1336,9 @@ export default function Dashboard() {
         `/databases/${db}/collections/${col}/stats`,
       );
       setStats(s);
-    } catch {
-      /* silent */
+    } catch (e: unknown) {
+      // Surface stats errors so they're visible
+      toast("Stats: " + (e as Error).message, "error");
     }
   };
 
@@ -1325,10 +1350,11 @@ export default function Dashboard() {
       ...prev,
       selected: prev.docs.find((d) => String(d._id) === id) ?? null,
     }));
+    // Sync URL immediately so refresh/share works
+    pushUrl(colToUse, id);
     showLoading("Loading details...");
     try {
       if (isScanner) {
-        // scanners are not allowed to request document details; keep selected summary only
         setState((prev) => ({ ...prev, details: null }));
       } else {
         const doc = serialise(
@@ -1338,11 +1364,6 @@ export default function Dashboard() {
           ),
         );
         setState((prev) => ({ ...prev, details: doc }));
-      }
-      try {
-        /* persistence handled centrally */
-      } catch (e) {
-        /* ignore */
       }
     } catch (e: unknown) {
       toast((e as Error).message, "error");
@@ -1692,7 +1713,18 @@ export default function Dashboard() {
               key={String(doc._id)}
               className={`list-item${isActive ? " active" : ""}`}
               onClick={() => {
-                selectDoc(String(doc._id));
+                const clickedId = String(doc._id);
+                if (isActive) {
+                  // Same participant clicked again – close detail panel
+                  setState((prev) => ({
+                    ...prev,
+                    selected: null,
+                    details: null,
+                  }));
+                  pushUrl(state.col, null);
+                } else {
+                  selectDoc(clickedId);
+                }
               }}
             >
               <div className="list-item-name">{name}</div>

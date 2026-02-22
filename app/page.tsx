@@ -1,7 +1,7 @@
 "use client";
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import Dashboard from '@/components/Dashboard';
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import Dashboard from "@/components/Dashboard";
 
 export default function Home() {
   const [ready, setReady] = useState(false);
@@ -10,15 +10,21 @@ export default function Home() {
 
   useEffect(() => {
     try {
-      const token = typeof window !== 'undefined' ? window.localStorage.getItem('authToken') : null;
-      const basic = typeof window !== 'undefined' ? window.localStorage.getItem('basicAuth') : null;
+      const token =
+        typeof window !== "undefined"
+          ? window.localStorage.getItem("authToken")
+          : null;
+      const basic =
+        typeof window !== "undefined"
+          ? window.localStorage.getItem("basicAuth")
+          : null;
       if (!token && !basic) {
-        router.push('/login');
+        router.push("/login");
         return;
       }
       setAllowed(true);
     } catch (e) {
-      router.push('/login');
+      router.push("/login");
       return;
     } finally {
       setReady(true);
