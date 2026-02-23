@@ -776,11 +776,16 @@ textarea.form-input {
 .scanner-box {
   width: 100%;
   max-width: 500px;
+  min-height: 500px; /* ensure sufficient height for camera and controls */
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 16px;
-  overflow: hidden;
+  overflow: visible; /* allow controls to be visible */
   margin-bottom: 24px;
+  position: relative; /* for overlay positioning */
+  padding: 0; /* remove inner default padding so qr area fits cleanly */
+  display: flex;
+  flex-direction: column;
 }
 
 .scanner-head {
@@ -794,13 +799,61 @@ textarea.form-input {
   gap: 10px;
 }
 
-#qr-reader {
-  width: 100% !important;
-  border: none !important;
+/* QR reader wrapper and video styling to maintain aspect ratio and prevent stretching */
+.qr-wrapper { 
+  position: relative; 
+  width: 100%; 
+  aspect-ratio: 4 / 3; /* modern aspect ratio property */
+  min-height: 300px; /* minimum height for usability */
+  overflow: hidden; 
+  background: #000; /* solid background while camera loads */
+  border-radius: 0; /* match scanner-box design */
+}
+.qr-wrapper #qr-reader { 
+  position: absolute !important; 
+  top: 0; 
+  left: 0; 
+  right: 0; 
+  bottom: 0; 
+  width: 100% !important; 
+  height: 100% !important; 
+  border: none !important; 
+}
+.qr-wrapper #qr-reader video { 
+  width: 100% !important; 
+  height: 100% !important; 
+  object-fit: cover !important; 
+  border-radius: 0 !important; 
 }
 
-#qr-reader video {
-  border-radius: 0 !important;
+/* centered scan overlay frame */
+.qr-overlay { 
+  position: absolute; 
+  width: 250px; 
+  height: 250px; 
+  top: 50%; 
+  left: 50%; 
+  transform: translate(-50%, -50%); 
+  border-radius: 10px; 
+  border: 3px dashed rgba(255,255,255,0.85); 
+  box-shadow: 0 0 0 9999px rgba(0,0,0,0.12) inset; 
+  pointer-events: none; 
+  z-index: 2; /* ensure overlay is above video */
+}
+
+.scanner-controls { 
+  display: flex; 
+  justify-content: center; 
+  padding: 20px; /* increased padding for better visibility */
+  background: var(--card); /* ensure controls are visible on card background */
+  margin-top: auto; /* push controls to bottom if using flex */
+}
+.scanner-controls .start-btn, 
+.scanner-controls .stop-btn { 
+  width: 100%; 
+  max-width: 240px; 
+  padding: 12px 24px; /* ensure button is large enough to click */
+  font-size: 15px;
 }
 
 .scan-result {
@@ -953,41 +1006,7 @@ textarea.form-input {
   opacity: .3;
 }
 
-/* ─── HAMBURGER (mobile only) ────────────── */
-.hamburger {
-  display: none;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  color: var(--text);
-  width: 38px;
-  height: 38px;
-  border-radius: 8px;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-/* ─── SIDEBAR OVERLAY (mobile only) ─────── */
-.sidebar-overlay {
-  display: none;
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, .6);
-  z-index: 199;
-}
-
-.sidebar-close {
-  display: none;
-  background: none;
-  border: none;
-  color: var(--muted);
-  font-size: 20px;
-  cursor: pointer;
-  padding: 4px 8px;
-  line-height: 1;
-}
+/* hamburger and sidebar drawer removed — layout uses inline panels */
 
 /* ─── RESPONSIVE ─────────────────────────── */
 @media (max-width: 768px) {
@@ -1010,9 +1029,6 @@ textarea.form-input {
     padding-bottom: 8px;
   }
 
-  .hamburger {
-    display: inline-flex;
-  }
 
   .logo {
     font-size: 16px;
@@ -1037,31 +1053,7 @@ textarea.form-input {
     font-size: 11px;
   }
 
-  /* Sidebar: slide-in drawer */
-  .sidebar {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 300px;
-    max-width: 85vw;
-    height: 100%;
-    z-index: 200;
-    transform: translateX(-100%);
-    transition: transform .28s cubic-bezier(.4, 0, .2, 1);
-    box-shadow: 4px 0 24px rgba(0, 0, 0, .5);
-  }
-
-  .sidebar.open {
-    transform: translateX(0);
-  }
-
-  .sidebar-overlay {
-    display: block;
-  }
-
-  .sidebar-close {
-    display: block;
-  }
+  /* inline sidebar used on desktop; mobile uses stacked layout */
 
   /* Main area: stack vertically */
   .main {
@@ -1158,6 +1150,24 @@ textarea.form-input {
   /* Scanner panel */
   .scanner-panel {
     padding: 20px 12px;
+  }
+
+  .scanner-box {
+    max-width: 100%; /* full width on mobile */
+    min-height: 400px; /* reduced min-height for mobile */
+  }
+
+  .qr-wrapper {
+    min-height: 250px; /* smaller min-height for mobile */
+  }
+
+  .qr-overlay {
+    width: 200px; /* smaller overlay on mobile */
+    height: 200px;
+  }
+
+  .scanner-controls {
+    padding: 16px; /* slightly less padding on mobile */
   }
 }
 

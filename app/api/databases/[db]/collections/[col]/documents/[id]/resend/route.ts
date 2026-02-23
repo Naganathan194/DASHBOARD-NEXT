@@ -4,6 +4,7 @@ import { sendMail, APP_NAME } from '@/lib/mail';
 import { getEventDisplayName, isEventPass } from '@/lib/events';
 import { isAllowedCollection } from '@/lib/registrationCollections';
 import { ObjectId, Filter, Document } from 'mongodb';
+import { authorize, ROLES } from '@/lib/auth';
 
 function pick(doc: Record<string, unknown>, ...keys: string[]): string {
   for (const k of keys) if (doc[k]) return String(doc[k]);
@@ -14,10 +15,10 @@ function detailRow(label: string, value: string): string {
   if (!value || value.trim() === '') return '';
   return `
     <tr>
-      <td class="detail-label" style="padding:10px 16px 10px 0;border-bottom:1px solid #1e293b;color:#64748b;font-size:13px;white-space:nowrap;vertical-align:top;width:42%">
+      <td class="detail-label" style="padding:10px 16px 10px 0;border-bottom:1px solid #1e293b;color:#64748b;font-size:13px;vertical-align:top;max-width:42%;display:inline-block;word-break:break-word;overflow-wrap:break-word;">
         ${label}
       </td>
-      <td class="detail-value" style="padding:10px 0;border-bottom:1px solid #1e293b;color:#e2e8f0;font-size:14px;font-weight:500">
+      <td class="detail-value" style="padding:10px 0;border-bottom:1px solid #1e293b;color:#e2e8f0;font-size:14px;font-weight:500;vertical-align:top;max-width:58%;display:inline-block;word-break:break-word;overflow-wrap:break-word;">
         ${value}
       </td>
     </tr>`;
@@ -25,6 +26,9 @@ function detailRow(label: string, value: string): string {
 
 export async function POST(_req: Request, { params }: { params: Promise<{ db: string; col: string; id: string }> }) {
   const { db, col, id } = await params;
+  // require admin
+  const authCheck = await authorize(_req, [ROLES.ADMIN]);
+  if (authCheck instanceof NextResponse) return authCheck;
   if (!isAllowedCollection(col)) return NextResponse.json({ error: 'Collection not allowed' }, { status: 404 });
 
   try {
@@ -104,6 +108,9 @@ export async function POST(_req: Request, { params }: { params: Promise<{ db: st
       .detail-label  { font-size: 11px !important; padding: 8px 12px 8px 0 !important; width: 38% !important; }
       .detail-value  { font-size: 13px !important; padding: 8px 0 !important; }
       .event-badge   { padding: 8px 18px !important; font-size: 15px !important; }
+      .details-table td { display:block !important; width:100% !important; padding:8px 0 !important; box-sizing:border-box; }
+      .details-table td:first-child { padding-right:0 !important; }
+      .detail-row td { display:block !important; width:100% !important; }
     }
   </style>
 </head>
@@ -154,7 +161,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ db: st
       <h3 style="margin:0 0 18px;color:#60a5fa;font-size:13px;text-transform:uppercase;letter-spacing:1.5px;font-weight:800">
         ✦ Your Registration Details
       </h3>
-      <table style="width:100%;border-collapse:collapse">
+      <table class="details-table" style="width:100%;border-collapse:collapse">
         ${detailsHtml}
       </table>
     </div>

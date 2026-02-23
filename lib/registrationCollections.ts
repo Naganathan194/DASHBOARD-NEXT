@@ -12,11 +12,11 @@ export const ALLOWED_COLLECTIONS = [
 ] as const;
 
 export const DISPLAY_NAME_MAP: Record<string, string> = {
-  hackproofingregistrations:      'Hackproofing Registration',
-  prompttoproductregistrations:   'Prompt To Product Registration',
-  fullstackfusionregistrations:   'Full Stack Fusion Registration',
-  learnhowtothinkregistrations:   'Learn How To Think Registration',
-  portpassregistrations:          'Port Pass Registration',
+  hackproofingregistrations:      'Hackproofing',
+  prompttoproductregistrations:   'Prompt To Product',
+  fullstackfusionregistrations:   'Full Stack Fusion',
+  learnhowtothinkregistrations:   'Learn How To Think',
+  portpassregistrations:          'Port Pass',
 };
 
 export function isAllowedCollection(colName: string): boolean {

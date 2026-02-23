@@ -8,6 +8,7 @@
     "start": "next start"
   },
   "dependencies": {
+    "bcryptjs": "^2.4.3",
     "html5-qrcode": "^2.3.8",
     "mongodb": "^6.21.0",
     "next": "^16.1.6",
@@ -18,6 +19,8 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
+    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20",
     "@types/nodemailer": "^6.4.14",
     "@types/qrcode": "^1.5.5",
