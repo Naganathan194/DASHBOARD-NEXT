@@ -51,6 +51,8 @@ const formatKey = (k: string) =>
 
 const formatColName = (n: string) => getEventDisplayName(n);
 
+
+
 const getDocName = (doc: Doc): string => {
   for (const k of [
     "fullName",
@@ -453,11 +455,8 @@ function DocDetail({
                   Attendee uses this to check in
                 </p>
                 {doc.checkInTime != null && (
-                  <div style={{ fontSize: 12, color: "var(--blue)" }}>
-                    <i className="fas fa-clock" /> Checked in:{" "}
-                    {formatDateTime(
-                      doc.checkInTime as string | number | Date | null,
-                    )}
+                  <div style={{ fontSize: 12, color: 'var(--blue)' }}>
+                    <i className="fas fa-clock" /> Checked in: {formatDateTime(String(doc.checkInTime))}
                   </div>
                 )}
                 <a
@@ -677,18 +676,8 @@ function ScannerPanel({
 
       setScanResult(
         <div className={`scan-result success`}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              marginBottom: 12,
-            }}
-          >
-            <i
-              className="fas fa-user-circle"
-              style={{ fontSize: 36, color: "var(--accent)" }}
-            />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+            <i className="fas fa-user-circle" style={{ fontSize: 36, color: 'var(--accent)' }} />
             <div>
               <div className="scan-attendee-name">{name}</div>
               {eventName ? (
@@ -703,11 +692,14 @@ function ScannerPanel({
               )}
             </div>
           </div>
-          <div className={`checkin-status ${alreadyIn ? "in" : "out"}`}>
-            <i className={`fas fa-${alreadyIn ? "check-circle" : "clock"}`} />
-            {alreadyIn
-              ? `Already Checked In at ${formatDateTime(doc.checkInTime as string | number | Date | null)}`
-              : "Not Yet Checked In"}
+          {/* Event / Workshop name */}
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.4)', borderRadius: 20, padding: '4px 12px', fontSize: 12, color: 'var(--accent)', fontWeight: 600, marginBottom: 12 }}>
+            <i className="fas fa-calendar-star" />
+            {getEventDisplayName(r.collection)}
+          </div>
+          <div className={`checkin-status ${alreadyIn ? 'in' : 'out'}`}>
+            <i className={`fas fa-${alreadyIn ? 'check-circle' : 'clock'}`} />
+            {alreadyIn ? `Already Checked In at ${formatDateTime(String(doc.checkInTime))}` : 'Not Yet Checked In'}
           </div>
           <div
             style={{
@@ -1914,7 +1906,16 @@ export default function Dashboard() {
         {!isScanner && (
           <div
             className="sidebar-inline desktop-only"
-            style={{ width: 320, flexShrink: 0 }}
+            style={{
+              width: 320,
+              flexShrink: 0,
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+              minHeight: 0,
+              borderRight: "1px solid var(--border)",
+              background: "var(--surface)",
+            }}
           >
             <div className="sidebar-head">
               <span className="sidebar-title">
