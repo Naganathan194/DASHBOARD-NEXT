@@ -273,6 +273,7 @@ function DocDetail({
   onDelete,
   onResend,
   isAdmin,
+  stats,
 }: {
   doc: Doc;
   onApprove: (id: string) => void;
@@ -281,6 +282,7 @@ function DocDetail({
   onDelete: (id: string) => void;
   onResend?: (id: string) => void;
   isAdmin?: boolean;
+  stats?: Stats;
 }) {
   const [imgSrc, setImgSrc] = useState("");
   const name = getDocName(doc);
@@ -303,7 +305,14 @@ function DocDetail({
       <div className="detail-card">
         <div className="detail-header">
           <div>
-            <div className="detail-name">{name}</div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+              <div className="detail-name">{name}</div>
+              {stats && (
+                <div style={{ fontSize: 12, padding: "4px 12px", background: "var(--accent)", color: "white", borderRadius: 20 }}>
+                  <i className="fas fa-hourglass-half" style={{ marginRight: 6 }} /> {stats.pending} Pending
+                </div>
+              )}
+            </div>
             <div style={{ marginTop: 4 }}>
               <StatusPill status={status} />
             </div>
@@ -537,8 +546,8 @@ function ScannerPanel({
           console.warn("scanner stop error", err);
         });
         try {
-          await inst.clear().catch(() => {});
-        } catch {}
+          await inst.clear().catch(() => { });
+        } catch { }
         scannerRef.current = null;
       }
     } catch (err) {
@@ -555,7 +564,7 @@ function ScannerPanel({
       if (scannerRef.current) {
         try {
           await (scannerRef.current as any).stop();
-        } catch {}
+        } catch { }
         scannerRef.current = null;
       }
 
@@ -613,7 +622,7 @@ function ScannerPanel({
       setScanning(false);
       try {
         await stopScanner();
-      } catch {}
+      } catch { }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stopScanner, onToast]);
@@ -997,13 +1006,13 @@ export default function Dashboard() {
         PERSIST_KEY,
         JSON.stringify({ ...p, _ts: Date.now() }),
       );
-    } catch {}
+    } catch { }
   };
   const clearPersist = () => {
     if (typeof window === "undefined") return;
     try {
       sessionStorage.removeItem(PERSIST_KEY);
-    } catch {}
+    } catch { }
   };
 
   const toast = useCallback(
@@ -1035,7 +1044,7 @@ export default function Dashboard() {
     }
     try {
       clearPersist();
-    } catch {}
+    } catch { }
     pushUrl(null, null);
     router.replace("/login");
   };
@@ -1225,7 +1234,7 @@ export default function Dashboard() {
     };
     try {
       writePersist(toSave);
-    } catch {}
+    } catch { }
   }, [state.col, filterStatus, state.selected]);
 
   // ── DB change ─────────────────────────────────────────────────────────────

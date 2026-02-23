@@ -24,7 +24,21 @@ export async function GET(
             total: { $sum: 1 },
             approved: { $sum: { $cond: [{ $eq: ['$status', 'approved'] }, 1, 0] } },
             rejected: { $sum: { $cond: [{ $eq: ['$status', 'rejected'] }, 1, 0] } },
-            pending: { $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] } },
+            pending: { 
+              $sum: { 
+                $cond: [
+                  { 
+                    $or: [
+                      { $eq: ['$status', 'pending'] },
+                      { $and: [{ $eq: [{ $type: '$status' }, 'missing'] }] },
+                      { $eq: ['$status', null] }
+                    ]
+                  }, 
+                  1, 
+                  0
+                ] 
+              } 
+            },
             checkedIn: { $sum: { $cond: [{ $eq: ['$checkedIn', true] }, 1, 0] } },
           },
         },
