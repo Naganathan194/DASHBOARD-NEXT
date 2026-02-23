@@ -1906,7 +1906,16 @@ export default function Dashboard() {
         {!isScanner && (
           <div
             className="sidebar-inline desktop-only"
-            style={{ width: 320, flexShrink: 0 }}
+            style={{
+              width: 320,
+              flexShrink: 0,
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+              minHeight: 0,
+              borderRight: "1px solid var(--border)",
+              background: "var(--surface)",
+            }}
           >
             <div className="sidebar-head">
               <span className="sidebar-title">

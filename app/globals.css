@@ -1,3 +1,7 @@
+html {
+  height: 100%;
+}
+
 :root {
   --bg: #060a14;
   --surface: #0d1526;
@@ -28,6 +32,7 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 h1,
@@ -258,16 +263,19 @@ select:focus {
   flex: 1;
   display: flex;
   overflow: hidden;
+  min-height: 0;
 }
 
 .panel {
   display: none;
   flex: 1;
   overflow: hidden;
+  min-height: 0;
 }
 
 .panel.active {
   display: flex;
+  min-height: 0;
 }
 
 /* On desktop: hide sidebar when scanner tab is active */
@@ -286,6 +294,27 @@ select:focus {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-height: 0;
+}
+
+/* Desktop inline sidebar (used on records tab) */
+.sidebar-inline {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.sidebar-inline .sidebar-head,
+.sidebar-inline .search-wrap,
+.sidebar-inline>div:not(.list) {
+  flex-shrink: 0;
+}
+
+.sidebar-inline .list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .sidebar-head {
@@ -352,6 +381,7 @@ select:focus {
   flex: 1;
   overflow-y: auto;
   list-style: none;
+  min-height: 0;
 }
 
 .list-item {
@@ -419,8 +449,10 @@ select:focus {
 .content {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 24px;
   background: var(--bg);
+  min-height: 0;
 }
 
 /* ─── PLACEHOLDER ────────────────────────── */
@@ -776,14 +808,18 @@ textarea.form-input {
 .scanner-box {
   width: 100%;
   max-width: 500px;
-  min-height: 500px; /* ensure sufficient height for camera and controls */
+  min-height: 500px;
+  /* ensure sufficient height for camera and controls */
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 16px;
-  overflow: visible; /* allow controls to be visible */
+  overflow: visible;
+  /* allow controls to be visible */
   margin-bottom: 24px;
-  position: relative; /* for overlay positioning */
-  padding: 0; /* remove inner default padding so qr area fits cleanly */
+  position: relative;
+  /* for overlay positioning */
+  padding: 0;
+  /* remove inner default padding so qr area fits cleanly */
   display: flex;
   flex-direction: column;
 }
@@ -800,59 +836,71 @@ textarea.form-input {
 }
 
 /* QR reader wrapper and video styling to maintain aspect ratio and prevent stretching */
-.qr-wrapper { 
-  position: relative; 
-  width: 100%; 
-  aspect-ratio: 4 / 3; /* modern aspect ratio property */
-  min-height: 300px; /* minimum height for usability */
-  overflow: hidden; 
-  background: #000; /* solid background while camera loads */
-  border-radius: 0; /* match scanner-box design */
+.qr-wrapper {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  /* modern aspect ratio property */
+  min-height: 300px;
+  /* minimum height for usability */
+  overflow: hidden;
+  background: #000;
+  /* solid background while camera loads */
+  border-radius: 0;
+  /* match scanner-box design */
 }
-.qr-wrapper #qr-reader { 
-  position: absolute !important; 
-  top: 0; 
-  left: 0; 
-  right: 0; 
-  bottom: 0; 
-  width: 100% !important; 
-  height: 100% !important; 
-  border: none !important; 
+
+.qr-wrapper #qr-reader {
+  position: absolute !important;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100% !important;
+  height: 100% !important;
+  border: none !important;
 }
-.qr-wrapper #qr-reader video { 
-  width: 100% !important; 
-  height: 100% !important; 
-  object-fit: cover !important; 
-  border-radius: 0 !important; 
+
+.qr-wrapper #qr-reader video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  border-radius: 0 !important;
 }
 
 /* centered scan overlay frame */
-.qr-overlay { 
-  position: absolute; 
-  width: 250px; 
-  height: 250px; 
-  top: 50%; 
-  left: 50%; 
-  transform: translate(-50%, -50%); 
-  border-radius: 10px; 
-  border: 3px dashed rgba(255,255,255,0.85); 
-  box-shadow: 0 0 0 9999px rgba(0,0,0,0.12) inset; 
-  pointer-events: none; 
-  z-index: 2; /* ensure overlay is above video */
+.qr-overlay {
+  position: absolute;
+  width: 250px;
+  height: 250px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  border-radius: 10px;
+  border: 3px dashed rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.12) inset;
+  pointer-events: none;
+  z-index: 2;
+  /* ensure overlay is above video */
 }
 
-.scanner-controls { 
-  display: flex; 
-  justify-content: center; 
-  padding: 20px; /* increased padding for better visibility */
-  background: var(--card); /* ensure controls are visible on card background */
-  margin-top: auto; /* push controls to bottom if using flex */
+.scanner-controls {
+  display: flex;
+  justify-content: center;
+  padding: 20px;
+  /* increased padding for better visibility */
+  background: var(--card);
+  /* ensure controls are visible on card background */
+  margin-top: auto;
+  /* push controls to bottom if using flex */
 }
-.scanner-controls .start-btn, 
-.scanner-controls .stop-btn { 
-  width: 100%; 
-  max-width: 240px; 
-  padding: 12px 24px; /* ensure button is large enough to click */
+
+.scanner-controls .start-btn,
+.scanner-controls .stop-btn {
+  width: 100%;
+  max-width: 240px;
+  padding: 12px 24px;
+  /* ensure button is large enough to click */
   font-size: 15px;
 }
 
@@ -1011,10 +1059,11 @@ textarea.form-input {
 /* ─── RESPONSIVE ─────────────────────────── */
 @media (max-width: 768px) {
 
-  /* Allow body to scroll on mobile */
+  /* Allow body and layout to scroll on mobile */
   body {
     overflow: auto;
     height: auto;
+    min-height: 100vh;
   }
 
   /* Header: tighter, wrap-friendly */
@@ -1058,14 +1107,20 @@ textarea.form-input {
   /* Main area: stack vertically */
   .main {
     flex-direction: column;
+    overflow: visible;
+    min-height: unset;
   }
 
   .panel.active {
     flex-direction: column;
+    overflow: visible;
+    min-height: unset;
   }
 
   .content {
     padding: 16px;
+    overflow: visible;
+    min-height: unset;
   }
 
   /* Nav tabs: horizontal scroll */
@@ -1153,21 +1208,26 @@ textarea.form-input {
   }
 
   .scanner-box {
-    max-width: 100%; /* full width on mobile */
-    min-height: 400px; /* reduced min-height for mobile */
+    max-width: 100%;
+    /* full width on mobile */
+    min-height: 400px;
+    /* reduced min-height for mobile */
   }
 
   .qr-wrapper {
-    min-height: 250px; /* smaller min-height for mobile */
+    min-height: 250px;
+    /* smaller min-height for mobile */
   }
 
   .qr-overlay {
-    width: 200px; /* smaller overlay on mobile */
+    width: 200px;
+    /* smaller overlay on mobile */
     height: 200px;
   }
 
   .scanner-controls {
-    padding: 16px; /* slightly less padding on mobile */
+    padding: 16px;
+    /* slightly less padding on mobile */
   }
 }
 
