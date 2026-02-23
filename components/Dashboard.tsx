@@ -22,6 +22,19 @@ const formatKey = (k: string) =>
 
 const formatColName = (n: string) => getEventDisplayName(n);
 
+const formatDateTime = (value: string): string => {
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return value;
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  let hrs = d.getHours();
+  const mins = String(d.getMinutes()).padStart(2, '0');
+  const ampm = hrs >= 12 ? 'pm' : 'am';
+  hrs = hrs % 12 || 12;
+  return `${dd}/${mm}/${yyyy} ${String(hrs).padStart(2, '0')}:${mins} ${ampm}`;
+};
+
 const getDocName = (doc: Doc): string => {
   for (const k of ['fullName', 'firstName', 'candidateName', 'name', 'title', 'email']) {
     if (doc[k]) return String(doc[k]);
@@ -228,7 +241,7 @@ function DocDetail({
                 <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>Attendee uses this to check in</p>
                 {doc.checkInTime != null && (
                   <div style={{ fontSize: 12, color: 'var(--blue)' }}>
-                    <i className="fas fa-clock" /> Checked in: {new Date(String(doc.checkInTime)).toLocaleString()}
+                    <i className="fas fa-clock" /> Checked in: {formatDateTime(String(doc.checkInTime))}
                   </div>
                 )}
                 <a className="btn btn-ghost btn-sm" style={{ marginTop: 10, display: 'inline-flex' }}
@@ -310,16 +323,21 @@ function ScannerPanel({ onToast }: { onToast: (m: string, t: 'success' | 'error'
 
       setScanResult(
         <div className={`scan-result success`}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
             <i className="fas fa-user-circle" style={{ fontSize: 36, color: 'var(--accent)' }} />
             <div>
               <div className="scan-attendee-name">{name}</div>
               {email && <div style={{ fontSize: 13, color: 'var(--muted)' }}>{email}</div>}
             </div>
           </div>
+          {/* Event / Workshop name */}
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.4)', borderRadius: 20, padding: '4px 12px', fontSize: 12, color: 'var(--accent)', fontWeight: 600, marginBottom: 12 }}>
+            <i className="fas fa-calendar-star" />
+            {getEventDisplayName(r.collection)}
+          </div>
           <div className={`checkin-status ${alreadyIn ? 'in' : 'out'}`}>
             <i className={`fas fa-${alreadyIn ? 'check-circle' : 'clock'}`} />
-            {alreadyIn ? `Already Checked In at ${new Date(String(doc.checkInTime)).toLocaleTimeString()}` : 'Not Yet Checked In'}
+            {alreadyIn ? `Already Checked In at ${formatDateTime(String(doc.checkInTime))}` : 'Not Yet Checked In'}
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
             {Object.entries(doc)
