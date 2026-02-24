@@ -4,8 +4,8 @@
  */
 
 // Get admin credentials from environment or use defaults
-const ADMIN_USER = process.env.ADMIN_USER || 'Port2026';
-const ADMIN_PASS = process.env.ADMIN_PASS || 'Port@2026';
+const ADMIN_USER = process.env.ADMIN_USER;
+const ADMIN_PASS = process.env.ADMIN_PASS;
 
 // Create Basic Auth header
 function createBasicAuth(user, pass) {

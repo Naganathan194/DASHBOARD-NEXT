@@ -3,8 +3,8 @@
  * This verifies that the pending count aggregation is working correctly
  */
 
-const ADMIN_USER = 'Port2026';
-const ADMIN_PASS = 'Port@2026';
+const ADMIN_USER = process.env.ADMIN_USER;
+const ADMIN_PASS = process.env.ADMIN_PASS;
 
 function createBasicAuth(user, pass) {
   return 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64');
