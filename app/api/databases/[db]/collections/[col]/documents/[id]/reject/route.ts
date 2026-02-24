@@ -5,6 +5,11 @@ import { getEventDisplayName } from '@/lib/events';
 import { isAllowedCollection } from '@/lib/registrationCollections';
 import { ObjectId, Filter, Document } from 'mongodb';
 import { authorize, ROLES } from '@/lib/auth';
+import QRCode from 'qrcode';
+
+const WHATSAPP_COMMUNITY_LINK = process.env.WHATSAPP_COMMUNITY_LINK || '';
+const COORDINATORS_JSON = process.env.COORDINATORS || '';
+const WHATSAPP_COMMUNITY_LINK_PORTPASS = process.env.WHATSAPP_COMMUNITY_LINK_PORTPASS || '';
 
 function buildQuery(id: string): Filter<Document> {
   try { return { _id: new ObjectId(id) }; } catch { return { _id: id } as unknown as Filter<Document>; }
@@ -42,6 +47,56 @@ export async function POST(
       : String(d.fullName ?? d.name ?? d.candidateName ?? 'Attendee');
 
     const displayName = getEventDisplayName(col);
+
+    const parseCoordinators = (): Array<{ name?: string; contact?: string }> => {
+      try {
+        if (COORDINATORS_JSON.trim()) {
+          const parsed = JSON.parse(COORDINATORS_JSON);
+          if (Array.isArray(parsed)) return parsed.slice(0, 4);
+        }
+      } catch (e) {
+        // ignore parse errors
+      }
+      const coords: Array<{ name?: string; contact?: string }> = [];
+      for (let i = 1; i <= 4; i++) {
+        const n = process.env[`COORD_${i}_NAME`];
+        const c = process.env[`COORD_${i}_CONTACT`];
+        if (n || c) coords.push({ name: n, contact: c });
+      }
+      return coords;
+    };
+
+    const coordinators = parseCoordinators();
+
+    // choose link: port pass registrations get a separate link when configured
+    const whatsappLink = (col && String(col).toLowerCase() === 'portpassregistrations' && WHATSAPP_COMMUNITY_LINK_PORTPASS)
+      ? WHATSAPP_COMMUNITY_LINK_PORTPASS
+      : WHATSAPP_COMMUNITY_LINK;
+
+    let whatsappQrDataUrl = '';
+    if (whatsappLink) {
+      try {
+        whatsappQrDataUrl = await QRCode.toDataURL(whatsappLink, { errorCorrectionLevel: 'H' as const, margin: 1, width: 200 });
+      } catch (e) {
+        whatsappQrDataUrl = '';
+      }
+    }
+
+    const coordinatorsHtml = coordinators.length > 0
+      ? `
+        <div style="margin-top:18px;background:rgba(15,23,42,0.6);border:1px solid rgba(30,41,59,0.6);border-radius:12px;padding:16px 18px;text-align:left;margin-bottom:18px">
+          <h4 style="margin:0 0 8px;color:#93c5fd;font-size:13px;letter-spacing:0.6px">👥 Student Coordinators</h4>
+          <table style="width:100%;border-collapse:collapse">
+            ${coordinators.map(coord => `
+              <tr>
+                <td style="padding:6px 8px;color:#c7d2fe;font-weight:700;width:70%">${coord.name ?? 'Coordinator'}</td>
+                <td style="padding:6px 8px;color:#93c5fd;text-align:right;width:30%"><a href="${coord.contact && coord.contact.startsWith('+') ? `https://wa.me/${coord.contact.replace(/[^0-9]/g, '')}` : (coord.contact ? `tel:${coord.contact}` : '#')}" style="color:#a78bfa;text-decoration:none">${coord.contact ?? ''}</a></td>
+              </tr>
+            `).join('')}
+          </table>
+        </div>`
+      : '';
+
 
     if (email) {
       const html = `
@@ -94,6 +149,7 @@ export async function POST(
       If you believe this decision was made in error or have any questions, please reach out to the event organizer directly.
       We hope to see you at future events!
     </p>
+    ${coordinatorsHtml}
   </div>
 
   <div class="footer-pad" style="padding:20px 32px 26px;text-align:center;border-top:1px solid #1e293b">

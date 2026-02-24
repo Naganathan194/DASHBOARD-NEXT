@@ -8,6 +8,10 @@ import QRCode from 'qrcode';
 import crypto from 'crypto';
 import { authorize, ROLES } from '@/lib/auth';
 
+const WHATSAPP_COMMUNITY_LINK = process.env.WHATSAPP_COMMUNITY_LINK || '';
+const COORDINATORS_JSON = process.env.COORDINATORS || '';
+const WHATSAPP_COMMUNITY_LINK_PORTPASS = process.env.WHATSAPP_COMMUNITY_LINK_PORTPASS || '';
+
 function buildQuery(id: string): Filter<Document> {
   try { return { _id: new ObjectId(id) }; } catch { return { _id: id } as unknown as Filter<Document>; }
 }
@@ -138,6 +142,65 @@ export async function POST(
 
       const qrCid = `qrcode_${params_.id}@eventmanager`;
 
+      // Build WhatsApp join button (if configured) and coordinators list (up to 4)
+      const parseCoordinators = (): Array<{ name?: string; contact?: string }> => {
+        try {
+          if (COORDINATORS_JSON.trim()) {
+            const parsed = JSON.parse(COORDINATORS_JSON);
+            if (Array.isArray(parsed)) return parsed.slice(0, 4);
+          }
+        } catch (e) {
+          // ignore parse errors
+        }
+        // fallback: try individual env vars
+        const coords: Array<{ name?: string; contact?: string }> = [];
+        for (let i = 1; i <= 4; i++) {
+          const n = process.env[`COORD_${i}_NAME`];
+          const c = process.env[`COORD_${i}_CONTACT`];
+          if (n || c) coords.push({ name: n, contact: c });
+        }
+        return coords;
+      };
+
+      const coordinators = parseCoordinators();
+
+      const coordinatorsHtml = coordinators.length > 0
+        ? `
+          <div style="margin-top:18px;background:rgba(15,23,42,0.6);border:1px solid rgba(30,41,59,0.6);border-radius:12px;padding:16px 18px;text-align:left;margin-bottom:18px">
+            <h4 style="margin:0 0 8px;color:#93c5fd;font-size:13px;letter-spacing:0.6px">👥 Student Coordinators</h4>
+            <table style="width:100%;border-collapse:collapse">
+              ${coordinators.map(coord => `
+                <tr>
+                  <td style="padding:6px 8px;color:#c7d2fe;font-weight:700;width:70%">${coord.name ?? 'Coordinator'}</td>
+                  <td style="padding:6px 8px;color:#93c5fd;text-align:right;width:30%"><a href="${coord.contact && coord.contact.startsWith('+') ? `https://wa.me/${coord.contact.replace(/[^0-9]/g, '')}` : (coord.contact ? `tel:${coord.contact}` : '#')}" style="color:#a78bfa;text-decoration:none">${coord.contact ?? ''}</a></td>
+                </tr>
+              `).join('')}
+            </table>
+          </div>`
+        : '';
+
+      // choose link: port pass registrations get a separate link when configured
+      const whatsappLink = (params_.col && String(params_.col).toLowerCase() === 'portpassregistrations' && WHATSAPP_COMMUNITY_LINK_PORTPASS)
+        ? WHATSAPP_COMMUNITY_LINK_PORTPASS
+        : WHATSAPP_COMMUNITY_LINK;
+
+      let whatsappQrDataUrl = '';
+      if (whatsappLink) {
+        try {
+          whatsappQrDataUrl = await QRCode.toDataURL(whatsappLink, { errorCorrectionLevel: 'H' as const, margin: 1, width: 200 });
+        } catch (e) {
+          whatsappQrDataUrl = '';
+        }
+      }
+
+      const whatsappHtml = whatsappLink
+        ? `
+          <div style="margin-top:6px;text-align:center;margin-bottom:18px">
+            <a href="${whatsappLink}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#25D366;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:700">Join our WhatsApp Community</a>
+            ${whatsappQrDataUrl ? `<div style="margin-top:10px"><img src="${whatsappQrDataUrl}" alt="Join WhatsApp" style="width:140px;height:140px;border-radius:8px;display:block;margin:8px auto 0"/></div>` : ''}
+          </div>`
+        : '';
+
       // ── Email HTML ─────────────────────────────────────────────────────────
       const html = `
 <!DOCTYPE html>
@@ -255,6 +318,8 @@ export async function POST(
         <strong>💡 Pro Tip:</strong> Screenshot or download the attached PNG QR code and keep it accessible on your phone for the fastest check-in experience.
       </p>
     </div>
+    ${whatsappHtml}
+    ${coordinatorsHtml}
 
   </div>
 
