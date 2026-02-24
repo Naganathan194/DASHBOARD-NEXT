@@ -7,9 +7,19 @@ import { ObjectId, Filter, Document } from 'mongodb';
 import { authorize, ROLES } from '@/lib/auth';
 import QRCode from 'qrcode';
 
-const WHATSAPP_COMMUNITY_LINK = process.env.WHATSAPP_COMMUNITY_LINK || '';
-const COORDINATORS_JSON = process.env.COORDINATORS || '';
-const WHATSAPP_COMMUNITY_LINK_PORTPASS = process.env.WHATSAPP_COMMUNITY_LINK_PORTPASS || '';
+
+// Get coordinators from individual env variables
+function getCoordinators(): Array<{ name?: string; contact?: string }> {
+  const coords: Array<{ name?: string; contact?: string }> = [];
+  for (let i = 1; i <= 4; i++) {
+    const name = process.env[`COORD_${i}_NAME`];
+    const contact = process.env[`COORD_${i}_CONTACT`];
+    if (name || contact) {
+      coords.push({ name, contact });
+    }
+  }
+  return coords;
+}
 
 function buildQuery(id: string): Filter<Document> {
   try { return { _id: new ObjectId(id) }; } catch { return { _id: id } as unknown as Filter<Document>; }
@@ -48,43 +58,14 @@ export async function POST(
 
     const displayName = getEventDisplayName(col);
 
-    const parseCoordinators = (): Array<{ name?: string; contact?: string }> => {
-      try {
-        if (COORDINATORS_JSON.trim()) {
-          const parsed = JSON.parse(COORDINATORS_JSON);
-          if (Array.isArray(parsed)) return parsed.slice(0, 4);
-        }
-      } catch (e) {
-        // ignore parse errors
-      }
-      const coords: Array<{ name?: string; contact?: string }> = [];
-      for (let i = 1; i <= 4; i++) {
-        const n = process.env[`COORD_${i}_NAME`];
-        const c = process.env[`COORD_${i}_CONTACT`];
-        if (n || c) coords.push({ name: n, contact: c });
-      }
-      return coords;
-    };
-
-    const coordinators = parseCoordinators();
+    const coordinators = getCoordinators();
 
     // choose link: port pass registrations get a separate link when configured
-    const whatsappLink = (col && String(col).toLowerCase() === 'portpassregistrations' && WHATSAPP_COMMUNITY_LINK_PORTPASS)
-      ? WHATSAPP_COMMUNITY_LINK_PORTPASS
-      : WHATSAPP_COMMUNITY_LINK;
-
-    let whatsappQrDataUrl = '';
-    if (whatsappLink) {
-      try {
-        whatsappQrDataUrl = await QRCode.toDataURL(whatsappLink, { errorCorrectionLevel: 'H' as const, margin: 1, width: 200 });
-      } catch (e) {
-        whatsappQrDataUrl = '';
-      }
-    }
+   
 
     const coordinatorsHtml = coordinators.length > 0
       ? `
-        <div style="margin-top:18px;background:rgba(15,23,42,0.6);border:1px solid rgba(30,41,59,0.6);border-radius:12px;padding:16px 18px;text-align:left;margin-bottom:18px">
+        <div style="margin-top:18px;background:rgba(15,23,42,0.6);border:1px solid rgba(30,41,59,0.6);border-radius:12px;padding:14px 16px;text-align:left;margin-bottom:18px">
           <h4 style="margin:0 0 8px;color:#93c5fd;font-size:13px;letter-spacing:0.6px">👥 Student Coordinators</h4>
           <table style="width:100%;border-collapse:collapse">
             ${coordinators.map(coord => `

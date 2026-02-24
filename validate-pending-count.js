@@ -14,7 +14,7 @@ async function validatePendingCount() {
   try {
     console.log('🔍 Validation Test: Pending Count Accuracy\n');
     console.log('='.repeat(70));
-    
+
     const collections = [
       'hackproofingregistrations',
       'prompttoproductregistrations',
@@ -22,14 +22,14 @@ async function validatePendingCount() {
       'learnhowtothinkregistrations',
       'portpassregistrations',
     ];
-    
+
     let allValid = true;
-    
+
     for (const col of collections) {
       try {
         console.log(`\n📋 Collection: ${col}`);
         console.log('-'.repeat(70));
-        
+
         // Fetch documents
         const docsUrl = `http://localhost:3000/api/databases/test/collections/${col}/documents`;
         const docsResponse = await fetch(docsUrl, {
@@ -39,15 +39,15 @@ async function validatePendingCount() {
             'Authorization': createBasicAuth(ADMIN_USER, ADMIN_PASS),
           },
         });
-        
+
         if (!docsResponse.ok) {
           console.log(`❌ Failed to fetch documents: ${docsResponse.statusText}`);
           allValid = false;
           continue;
         }
-        
+
         const docs = await docsResponse.json();
-        
+
         // Fetch stats
         const statsUrl = `http://localhost:3000/api/databases/test/collections/${col}/stats`;
         const statsResponse = await fetch(statsUrl, {
@@ -57,15 +57,15 @@ async function validatePendingCount() {
             'Authorization': createBasicAuth(ADMIN_USER, ADMIN_PASS),
           },
         });
-        
+
         if (!statsResponse.ok) {
           console.log(`❌ Failed to fetch stats: ${statsResponse.statusText}`);
           allValid = false;
           continue;
         }
-        
+
         const stats = await statsResponse.json();
-        
+
         // Calculate pending from documents
         let calculatedPending = 0;
         let statusBreakdown = {
@@ -75,10 +75,10 @@ async function validatePendingCount() {
           rejected: 0,
           others: 0,
         };
-        
+
         docs.forEach(doc => {
           const docStatus = doc.status ? String(doc.status).toLowerCase() : null;
-          
+
           if (docStatus === 'pending') {
             calculatedPending++;
             statusBreakdown.pending++;
@@ -93,7 +93,7 @@ async function validatePendingCount() {
             statusBreakdown.others++;
           }
         });
-        
+
         console.log(`\n📊 Document Summary:`);
         console.log(`   Total documents fetched: ${docs.length}`);
         console.log(`\n   Status Breakdown:`);
@@ -102,18 +102,18 @@ async function validatePendingCount() {
         console.log(`   • Approved:                         ${statusBreakdown.approved}`);
         console.log(`   • Rejected:                         ${statusBreakdown.rejected}`);
         console.log(`   • Other status values:              ${statusBreakdown.others}`);
-        
+
         console.log(`\n📈 Comparison:`);
         console.log(`   Calculated Pending: ${calculatedPending}`);
         console.log(`   Stats API Pending:  ${stats.pending}`);
-        
+
         if (calculatedPending === stats.pending) {
           console.log(`   ✅ MATCH! Pending count is correct`);
         } else {
           console.log(`   ❌ MISMATCH! Expected ${calculatedPending}, got ${stats.pending}`);
           allValid = false;
         }
-        
+
         // Verify total matches
         if (docs.length === stats.total) {
           console.log(`   ✅ Total count matches: ${docs.length}`);
@@ -121,20 +121,20 @@ async function validatePendingCount() {
           console.log(`   ❌ Total count mismatch! Documents: ${docs.length}, Stats: ${stats.total}`);
           allValid = false;
         }
-        
+
       } catch (collErr) {
         console.log(`❌ Error testing ${col}: ${collErr.message}`);
         allValid = false;
       }
     }
-    
+
     console.log('\n' + '='.repeat(70));
     if (allValid) {
       console.log('✅ All validations passed! Pending count is being calculated correctly.\n');
     } else {
       console.log('❌ Some validations failed. Please check the pending count calculation.\n');
     }
-    
+
   } catch (error) {
     console.error('❌ Test failed:', error.message);
     process.exit(1);
