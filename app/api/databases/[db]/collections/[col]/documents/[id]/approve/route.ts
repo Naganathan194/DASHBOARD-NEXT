@@ -8,9 +8,9 @@ import QRCode from 'qrcode';
 import crypto from 'crypto';
 import { authorize, ROLES } from '@/lib/auth';
 
-const WHATSAPP_COMMUNITY_LINK = process.env.WHATSAPP_COMMUNITY_LINK || '';
-const COORDINATORS_JSON = process.env.COORDINATORS || '';
-const WHATSAPP_COMMUNITY_LINK_PORTPASS = process.env.WHATSAPP_COMMUNITY_LINK_PORTPASS || '';
+const WHATSAPP_COMMUNITY_LINK = process.env.WHATSAPP_COMMUNITY_LINK;
+const COORDINATORS_JSON = process.env.COORDINATORS;
+const WHATSAPP_COMMUNITY_LINK_PORTPASS = process.env.WHATSAPP_COMMUNITY_LINK_PORTPASS;
 
 function buildQuery(id: string): Filter<Document> {
   try { return { _id: new ObjectId(id) }; } catch { return { _id: id } as unknown as Filter<Document>; }
