@@ -13,12 +13,17 @@ export async function GET(_req: Request, { params }: { params: Promise<{ db: str
     // Only return allowed collections
     let names: string[] = cols.map((c: { name: string }) => c.name)
       .filter((n) => ALLOWED_COLLECTIONS_SET.has(String(n).toLowerCase()));
-    // If non-admin, restrict to assignedEvent
+    // If non-admin, restrict to assignedEvent ('*' = all events)
     const role = String((authCheck as Record<string, unknown>).role || '');
     if (role === ROLES.ATTENDEE_VIEWER) {
       const assigned = String((authCheck as Record<string, unknown>).assignedEvent || '');
-      if (assigned) names = names.filter((n) => String(n).toLowerCase() === assigned.toLowerCase());
-      else names = [];
+      if (assigned === '*') {
+        // all-events access – return every allowed collection as-is
+      } else if (assigned) {
+        names = names.filter((n) => String(n).toLowerCase() === assigned.toLowerCase());
+      } else {
+        names = [];
+      }
     }
     return NextResponse.json(names);
   } catch (e: unknown) {

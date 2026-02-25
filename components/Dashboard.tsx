@@ -1107,10 +1107,17 @@ export default function Dashboard() {
           }
         } else if (role === "ATTENDEE_VIEWER") {
           await onDbChange("test");
-          if (assigned) {
+          if (assigned && assigned !== "*") {
+            // Specific-event viewer: auto-load their one collection
             await onColChange(assigned, "test");
             setState((s) => ({ ...s, col: assigned }));
             if (urlId) await selectDoc(urlId, "test", assigned!);
+          } else if (assigned === "*") {
+            // All-events viewer: let them pick a collection; restore from URL if present
+            if (urlCol) {
+              await onColChange(urlCol, "test");
+              if (urlId) await selectDoc(urlId, "test", urlCol);
+            }
           }
         } else if (role === "SCANNER") {
           if (assigned) {
@@ -1797,19 +1804,34 @@ export default function Dashboard() {
             >
               Database: <strong style={{ marginLeft: 6 }}>test</strong>
             </div>
-            <div
-              style={{
-                padding: "8px 12px",
-                borderRadius: 6,
-                background: "var(--card)",
-                fontSize: 13,
-              }}
-            >
-              Event:{" "}
-              <strong style={{ marginLeft: 6 }}>
-                {assignedEvent ? getEventDisplayName(assignedEvent) : "—"}
-              </strong>
-            </div>
+            {assignedEvent === "*" ? (
+              <select
+                value={state.col}
+                onChange={(e) => onColChange(e.target.value)}
+                disabled={!cols.length}
+              >
+                <option value="">Select Event</option>
+                {cols.map((c) => (
+                  <option key={c} value={c}>
+                    {getEventDisplayName(c)}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 6,
+                  background: "var(--card)",
+                  fontSize: 13,
+                }}
+              >
+                Event:{" "}
+                <strong style={{ marginLeft: 6 }}>
+                  {assignedEvent ? getEventDisplayName(assignedEvent) : "—"}
+                </strong>
+              </div>
+            )}
           </div>
         ) : null}
         <style>{`
@@ -1837,6 +1859,15 @@ export default function Dashboard() {
           .list .list-item { box-sizing: border-box; }
         `}</style>
         <div className="header-right">
+          {isViewer && (
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={exportExcel}
+              disabled={exportDisabled}
+            >
+              <i className="fas fa-download" /> Export
+            </button>
+          )}
           {isAdmin && (
             <>
               <button
