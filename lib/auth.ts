@@ -72,7 +72,8 @@ export async function getAuthFromRequest(req: Request) {
   }
 }
 
-/** Enforce that for non-admin roles, requested collection matches assignedEvent on token */
+/** Enforce that for non-admin roles, requested collection matches assignedEvent on token.
+ *  assignedEvent === '*' grants access to all collections. */
 export function assertAssignedEvent(payload: Record<string, unknown>, collection: string) {
   try {
     const role = String(payload.role || '');
@@ -81,6 +82,8 @@ export function assertAssignedEvent(payload: Record<string, unknown>, collection
     if (role === ROLES.ATTENDEE_VIEWER || role === ROLES.SCANNER) {
       const assigned = String(payload.assignedEvent ?? '');
       if (!assigned) return NextResponse.json({ error: 'No event assigned' }, { status: 403 });
+      // '*' means all-events access — skip collection check
+      if (assigned === '*') return null;
       if (assigned.toLowerCase() !== String(collection || '').toLowerCase()) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     return null;

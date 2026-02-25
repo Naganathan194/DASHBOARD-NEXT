@@ -75,7 +75,7 @@ export default function ManageUsersPage() {
       alert("Username and password (min 8 chars) required");
       return;
     }
-    // Assigned event required for Viewer/Scanner
+    // Assigned event required for Viewer/Scanner ("*" = all events is valid)
     if (
       (form.role === "ATTENDEE_VIEWER" || form.role === "SCANNER") &&
       !form.assignedEvent
@@ -147,7 +147,7 @@ export default function ManageUsersPage() {
       alert("Cannot assign ADMIN role");
       return;
     }
-    // Assigned event required for Viewer/Scanner
+    // Assigned event required for Viewer/Scanner ("*" = all events is valid)
     if (
       (editForm.role === "ATTENDEE_VIEWER" || editForm.role === "SCANNER") &&
       !editForm.assignedEvent
@@ -254,6 +254,7 @@ export default function ManageUsersPage() {
                 }
               >
                 <option value="">Select event...</option>
+                <option value="*">All Events</option>
                 {ALLOWED_COLLECTIONS.map((c) => (
                   <option key={c} value={c}>
                     {getEventDisplayName(c)}
@@ -358,12 +359,15 @@ export default function ManageUsersPage() {
                             disabled={editForm.role === "ADMIN"}
                           >
                             <option value="">(none)</option>
+                            <option value="*">All Events</option>
                             {ALLOWED_COLLECTIONS.map((c) => (
                               <option key={c} value={c}>
                                 {getEventDisplayName(c)}
                               </option>
                             ))}
                           </select>
+                        ) : u.assignedEvent === "*" ? (
+                          <span style={{ fontStyle: "italic", opacity: 0.75 }}>All Events</span>
                         ) : u.assignedEvent ? (
                           getEventDisplayName(u.assignedEvent)
                         ) : (
@@ -497,6 +501,7 @@ export default function ManageUsersPage() {
                           disabled={editForm.role === "ADMIN"}
                         >
                           <option value="">(none)</option>
+                          <option value="*">All Events</option>
                           {ALLOWED_COLLECTIONS.map((c) => (
                             <option key={c} value={c}>
                               {getEventDisplayName(c)}
@@ -559,9 +564,13 @@ export default function ManageUsersPage() {
                           </div>
                         </div>
                         <div style={{ color: "var(--muted)", marginTop: 6 }}>
-                          {u.assignedEvent
-                            ? getEventDisplayName(u.assignedEvent)
-                            : "—"}
+                          {u.assignedEvent === "*" ? (
+                            <span style={{ fontStyle: "italic" }}>All Events</span>
+                          ) : u.assignedEvent ? (
+                            getEventDisplayName(u.assignedEvent)
+                          ) : (
+                            "—"
+                          )}
                         </div>
                         <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
                           <button
