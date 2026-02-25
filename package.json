@@ -10,6 +10,7 @@
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "html5-qrcode": "^2.3.8",
+    "lucide-react": "^0.575.0",
     "mongodb": "^6.21.0",
     "next": "^16.1.6",
     "nodemailer": "^6.9.8",

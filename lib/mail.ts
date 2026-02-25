@@ -5,10 +5,9 @@ const EMAIL_PASS = process.env.EMAIL_PASS || 'your_password';
 const APP_NAME   = process.env.APP_NAME   || 'EventManager';
 
 const transporter = nodemailer.createTransport({
-  host: 'smtp-mail.outlook.com',
+  host: 'smtp.gmail.com',
   port: 587,
   secure: false,        // use STARTTLS on 587
-  requireTLS: true,     // force TLS upgrade
   auth: { user: EMAIL_USER, pass: EMAIL_PASS },
   tls: { minVersion: 'TLSv1.2' },
 });
