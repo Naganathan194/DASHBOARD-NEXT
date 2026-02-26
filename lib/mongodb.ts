@@ -16,10 +16,10 @@ const options: MongoClientOptions = {
   minPoolSize: 0,
   maxIdleTimeMS: 10_000,
 
-  // Fail fast rather than queue requests indefinitely.
-  serverSelectionTimeoutMS: 10_000,
-  connectTimeoutMS: 10_000,
-  socketTimeoutMS: 20_000,
+  // Give enough time for Atlas M0 cold-start (free tier can be slow).
+  serverSelectionTimeoutMS: 30_000,
+  connectTimeoutMS: 30_000,
+  socketTimeoutMS: 45_000,
 
   // Retry once on transient network errors.
   retryWrites: true,

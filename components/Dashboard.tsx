@@ -944,6 +944,12 @@ export default function Dashboard() {
   const isScanner = userRole === "SCANNER";
   const [searchQ, setSearchQ] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
+  // ── PDF transaction-ID filter ──────────────────────────────────────────────
+  const [pdfTxIds, setPdfTxIds] = useState<Set<string> | null>(null);
+  const [pdfFileName, setPdfFileName] = useState<string>("");
+  const [pdfTxIdList, setPdfTxIdList] = useState<string[]>([]);
+  const [showPdfIds, setShowPdfIds] = useState(false);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [editFormData, setEditFormData] = useState<Record<string, any>>({});
   const [modals, setModals] = useState({
@@ -954,6 +960,7 @@ export default function Dashboard() {
   const autoRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const restoringRef = useRef(false);
   const restoredOnceRef = useRef(false);
+  const toastCounterRef = useRef(0);
 
   // ── URL sync helper ────────────────────────────────────────────────────────
   // Shallow-updates browser URL query params without Next.js navigation or
@@ -1009,7 +1016,7 @@ export default function Dashboard() {
 
   const toast = useCallback(
     (msg: string, type: "success" | "error" | "info" = "info") => {
-      const id = Date.now();
+      const id = ++toastCounterRef.current;
       setToasts((prev) => [...prev, { id, msg, type }]);
       setTimeout(
         () => setToasts((prev) => prev.filter((t) => t.id !== id)),
@@ -1140,18 +1147,41 @@ export default function Dashboard() {
   // ── filter ────────────────────────────────────────────────────────────────
   const applyFilter = useCallback(
     (docs: Doc[], q: string, st: string): Doc[] => {
+      const qLower = q.toLowerCase();
       return docs.filter((d) => {
         const name = getDocName(d).toLowerCase();
         const email = getDocEmail(d).toLowerCase();
+        // Gather all known transaction-ID-like fields into one string for matching
+        const txField = String(
+          d.transactionId ?? d.transaction_id ?? d.utr ?? d.upiTransactionId ??
+          d.paymentId ?? d.payment_id ?? d.txnId ?? d.txn_id ?? d.referenceId ?? ""
+        ).toLowerCase();
         const matchQ =
           !q ||
-          name.includes(q) ||
-          email.includes(q) ||
-          String(d.registrationId ?? "").includes(q);
+          name.includes(qLower) ||
+          email.includes(qLower) ||
+          String(d.registrationId ?? "").includes(q) ||
+          txField.includes(qLower);
         const docSt = getDocStatus(d);
         const matchS = !st || docSt === st;
         return matchQ && matchS;
       });
+    },
+    [],
+  );
+
+  // ── PDF match helper – checks if ANY field value in the doc contains one
+  // of the transaction IDs extracted from the uploaded bank statement PDF.
+  const docMatchesPdf = useCallback(
+    (doc: Doc, txIds: Set<string> | null): boolean => {
+      if (!txIds || txIds.size === 0) return false;
+      const allVals = Object.values(doc).map((v) =>
+        String(v ?? "").toLowerCase(),
+      );
+      for (const tid of Array.from(txIds)) {
+        if (allVals.some((f) => f.includes(tid.toLowerCase()))) return true;
+      }
+      return false;
     },
     [],
   );
@@ -1297,6 +1327,13 @@ export default function Dashboard() {
     // Update URL – collection selected, no participant yet
     pushUrl(col, null);
     if (isScanner) return [];
+
+    // Special case: "All Events" – aggregate all collections
+    if (col === "__all__") {
+      const docs = await loadAllDocs();
+      return docs;
+    }
+
     const docs = await loadDocs(dbToUse, col);
     await loadStats(dbToUse, col);
     startAutoRefresh(dbToUse, col);
@@ -1350,10 +1387,157 @@ export default function Dashboard() {
     }
   };
 
+  // ── load all events (admin "All Events" mode) ──────────────────────────────
+  const loadAllDocs = async (): Promise<Doc[]> => {
+    if (isScanner) return [];
+    showLoading("Fetching all event records...");
+    const allDocs: Doc[] = [];
+    try {
+      for (const col of ALLOWED_COLLECTIONS) {
+        try {
+          const docs = (
+            await api<Doc[]>(
+              "GET",
+              `/databases/${state.db}/collections/${col}/documents`,
+            )
+          ).map(serialise);
+          const eventName = getEventDisplayName(col) || col;
+          docs.forEach((d) => {
+            (d as any).__eventName = eventName;
+            (d as any).__col = col; // track source collection for per-doc actions
+            allDocs.push(d);
+          });
+        } catch {
+          // skip unavailable collections silently
+        }
+      }
+      const sorted = allDocs.sort((a, b) => {
+        const ra = String(a.registrationId ?? a.regId ?? a.registerNumber ?? "");
+        const rb = String(b.registrationId ?? b.regId ?? b.registerNumber ?? "");
+        return ra.localeCompare(rb, undefined, { numeric: true });
+      });
+      // Compute stats client-side from merged docs
+      const computedStats: Stats = {
+        total: sorted.length,
+        approved: sorted.filter((d) => d.status === "approved").length,
+        rejected: sorted.filter((d) => d.status === "rejected").length,
+        checkedIn: sorted.filter((d) => !!d.checkedIn).length,
+        pending: sorted.filter(
+          (d) => !d.status || d.status === "pending",
+        ).length,
+      };
+      setState((prev) => ({
+        ...prev,
+        docs: sorted,
+        filtered: applyFilter(sorted, searchQ, filterStatus),
+      }));
+      setStats(computedStats);
+      return sorted;
+    } catch (e: unknown) {
+      toast((e as Error).message, "error");
+    } finally {
+      hideLoading();
+    }
+    return [];
+  };
+
+  // ── parse PDF bank statement for transaction IDs ───────────────────────────
+  const parsePdf = async (file: File): Promise<string[]> => {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const pdfjsLib = await import("pdfjs-dist");
+      // Use locally served worker (copied to /public at build time) to avoid
+      // CDN fetch failures in all environments including localhost.
+      (pdfjsLib as any).GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+      const pdf = await (pdfjsLib as any)
+        .getDocument({ data: arrayBuffer })
+        .promise;
+
+      // Collect every text token from every page individually (not joined)
+      // so we can run per-token and joined-line matching.
+      const allTokens: string[] = [];
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        for (const item of content.items) {
+          if ("str" in item && (item as any).str.trim()) {
+            allTokens.push((item as any).str.trim());
+          }
+        }
+      }
+
+      // Join all tokens with a space so multi-token patterns work
+      const fullText = allTokens.join(" ");
+
+      const ids = new Set<string>();
+
+      // ── Pattern 1 ── UPI/NAME/TXNID/UPI  (Description column)
+      // Kotak format: UPI/VAMSI KASARANE/604786088621/UPI
+      // The name portion may contain spaces so we use [^/]+ greedily
+      const p1 = /UPI\/[^/]+?\/(\d{9,15})\/UPI/gi;
+
+      // ── Pattern 2 ── UPI-XXXX or UPI/XXXX  (Chq/Ref No column)
+      // Kotak format: UPI-604798425905
+      const p2 = /UPI[-/](\d{9,15})/gi;
+
+      // ── Pattern 3 ── Any standalone 12-digit number (UPI UTR standard length)
+      const p3 = /\b(\d{12})\b/g;
+
+      // ── Pattern 4 ── UTR followed by digits
+      const p4 = /UTR\s*:?\s*(\d{9,15})/gi;
+
+      for (const pat of [p1, p2, p3, p4]) {
+        let m: RegExpExecArray | null;
+        while ((m = pat.exec(fullText)) !== null) {
+          ids.add(m[1]);
+        }
+      }
+
+      return Array.from(ids);
+    } catch (e: unknown) {
+      toast("PDF parse error: " + (e as Error).message, "error");
+      return [];
+    }
+  };
+
+  // ── handle PDF upload by user ──────────────────────────────────────────────
+  const handlePdfUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPdfFileName(file.name);
+    showLoading("Parsing PDF statement...");
+    const ids = await parsePdf(file);
+    hideLoading();
+    if (ids.length === 0) {
+      toast("No transaction IDs found in the uploaded PDF", "error");
+      setPdfTxIds(null);
+      setPdfTxIdList([]);
+      setPdfFileName("");
+    } else {
+      setPdfTxIds(new Set(ids));
+      setPdfTxIdList(ids);
+      toast(`Found ${ids.length} transaction ID(s) in PDF – filtering list`, "success");
+    }
+    // Reset file input so the same file can be re-uploaded
+    if (pdfInputRef.current) pdfInputRef.current.value = "";
+  };
+
   // ── select doc ────────────────────────────────────────────────────────────
   const selectDoc = async (id: string, dbParam?: string, colParam?: string) => {
     const dbToUse = dbParam ?? state.db;
-    const colToUse = colParam ?? state.col;
+    // In "All Events" mode, resolve the real collection from the doc's __col metadata
+    const resolvedCol = colParam
+      ? colParam
+      : (() => {
+          if (state.col === "__all__") {
+            const found = state.docs.find((d) => String(d._id) === id);
+            return found ? String((found as any).__col ?? state.col) : state.col;
+          }
+          return state.col;
+        })();
+    const colToUse = resolvedCol;
     setState((prev) => ({
       ...prev,
       selected: prev.docs.find((d) => String(d._id) === id) ?? null,
@@ -1371,6 +1555,14 @@ export default function Dashboard() {
             `/databases/${dbToUse}/collections/${colToUse}/documents/${id}`,
           ),
         );
+        // Preserve __eventName and __col metadata from the list entry (for all-events mode)
+        const listEntry = state.docs.find((d) => String(d._id) === id);
+        if (listEntry) {
+          if ((listEntry as any).__eventName)
+            (doc as any).__eventName = (listEntry as any).__eventName;
+          if ((listEntry as any).__col)
+            (doc as any).__col = (listEntry as any).__col;
+        }
         setState((prev) => ({ ...prev, details: doc }));
       }
     } catch (e: unknown) {
@@ -1380,17 +1572,32 @@ export default function Dashboard() {
     }
   };
 
+  // ── helper: resolve the real collection for currently selected doc ─────────
+  // In "All Events" mode the true collection is stored in __col on the details doc.
+  const effectiveCol = (): string => {
+    if (state.col === "__all__" && state.details) {
+      const c = (state.details as any).__col;
+      if (c) return String(c);
+    }
+    return state.col;
+  };
+
   // ── approve ───────────────────────────────────────────────────────────────
   const approveDoc = async (id: string) => {
+    const col = effectiveCol();
     showLoading("Generating QR & sending email...");
     try {
       await api(
         "POST",
-        `/databases/${state.db}/collections/${state.col}/documents/${id}/approve`,
+        `/databases/${state.db}/collections/${col}/documents/${id}/approve`,
       );
       toast("Approved! QR sent to attendee.", "success");
-      await loadDocs(state.db, state.col);
-      await loadStats(state.db, state.col);
+      if (state.col !== "__all__") {
+        await loadDocs(state.db, col);
+        await loadStats(state.db, col);
+      } else {
+        await loadAllDocs();
+      }
       await selectDoc(id);
     } catch (e: unknown) {
       toast((e as Error).message, "error");
@@ -1412,16 +1619,21 @@ export default function Dashboard() {
       return;
     }
     closeModal("reject");
+    const col = effectiveCol();
     showLoading("Rejecting & sending email...");
     try {
       await api(
         "POST",
-        `/databases/${state.db}/collections/${state.col}/documents/${state.rejectTargetId}/reject`,
+        `/databases/${state.db}/collections/${col}/documents/${state.rejectTargetId}/reject`,
         { reason: rejectReason },
       );
       toast("Rejected. Email sent to attendee.", "info");
-      await loadDocs(state.db, state.col);
-      await loadStats(state.db, state.col);
+      if (state.col !== "__all__") {
+        await loadDocs(state.db, col);
+        await loadStats(state.db, col);
+      } else {
+        await loadAllDocs();
+      }
       if (state.rejectTargetId) await selectDoc(state.rejectTargetId);
     } catch (e: unknown) {
       toast((e as Error).message, "error");
@@ -1438,12 +1650,13 @@ export default function Dashboard() {
   };
 
   const openEditModal = async (id: string) => {
+    const col = effectiveCol();
     showLoading("Loading...");
     try {
       const doc = serialise(
         await api<Doc>(
           "GET",
-          `/databases/${state.db}/collections/${state.col}/documents/${id}`,
+          `/databases/${state.db}/collections/${col}/documents/${id}`,
         ),
       );
       setState((prev) => ({ ...prev, editingDoc: doc }));
@@ -1464,6 +1677,7 @@ export default function Dashboard() {
 
   const saveDoc = async () => {
     const data: Record<string, unknown> = { ...editFormData };
+    const col = effectiveCol();
 
     if (state.editingDoc) {
       Object.keys(data).forEach((k) => {
@@ -1478,7 +1692,7 @@ export default function Dashboard() {
       if (state.editingDoc) {
         await api(
           "PUT",
-          `/databases/${state.db}/collections/${state.col}/documents/${String(state.editingDoc._id)}`,
+          `/databases/${state.db}/collections/${col}/documents/${String(state.editingDoc._id)}`,
           data,
         );
         toast("Document updated", "success");
@@ -1486,13 +1700,17 @@ export default function Dashboard() {
       } else {
         await api(
           "POST",
-          `/databases/${state.db}/collections/${state.col}/documents`,
+          `/databases/${state.db}/collections/${col}/documents`,
           data,
         );
         toast("Document created", "success");
       }
-      await loadDocs(state.db, state.col);
-      await loadStats(state.db, state.col);
+      if (state.col !== "__all__") {
+        await loadDocs(state.db, col);
+        await loadStats(state.db, col);
+      } else {
+        await loadAllDocs();
+      }
     } catch (e: unknown) {
       toast((e as Error).message, "error");
     } finally {
@@ -1508,16 +1726,21 @@ export default function Dashboard() {
 
   const confirmDelete = async () => {
     closeModal("delete");
+    const col = effectiveCol();
     showLoading("Deleting...");
     try {
       await api(
         "DELETE",
-        `/databases/${state.db}/collections/${state.col}/documents/${state.deleteTargetId}`,
+        `/databases/${state.db}/collections/${col}/documents/${state.deleteTargetId}`,
       );
       toast("Document deleted", "info");
       setState((prev) => ({ ...prev, selected: null, details: null }));
-      await loadDocs(state.db, state.col);
-      await loadStats(state.db, state.col);
+      if (state.col !== "__all__") {
+        await loadDocs(state.db, col);
+        await loadStats(state.db, col);
+      } else {
+        await loadAllDocs();
+      }
     } catch (e: unknown) {
       toast((e as Error).message, "error");
     } finally {
@@ -1528,7 +1751,39 @@ export default function Dashboard() {
   // ── export ────────────────────────────────────────────────────────────────
   const exportExcel = async () => {
     const XLSX = await import("xlsx");
-    // If a collection is selected, keep existing behavior
+    // "__all__" mode: we already have all docs in state – export them directly
+    if (state.col === "__all__") {
+      const docs = state.filtered.length ? state.filtered : state.docs;
+      if (!docs.length) { toast("No records to export", "info"); return; }
+      const keysSet = new Set<string>();
+      docs.forEach((d) =>
+        Object.keys(d).forEach((k) => { if (!isImageKey(k) && k !== "__col") keysSet.add(k); }),
+      );
+      keysSet.delete("__eventName");
+      const keys = ["__eventName", ...Array.from(keysSet)];
+      const headerRow = keys.map((k) =>
+        k === "__eventName" ? "Event Name" : formatKey(k),
+      );
+      const rows = [
+        headerRow,
+        ...docs.map((d) =>
+          keys.map((k) => {
+            const v = (d as any)[k];
+            if (v == null) return "";
+            if (DATE_FIELD_KEYS.has(k) || isIsoDateString(v))
+              return formatDateTime(v as string | number | Date | null);
+            if (typeof v === "object") return JSON.stringify(v);
+            return String(v);
+          }),
+        ),
+      ];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), "All Events");
+      XLSX.writeFile(wb, `all_events_${new Date().toISOString().split("T")[0]}.xlsx`);
+      toast("Exported successfully", "success");
+      return;
+    }
+    // If a specific collection is selected, keep existing behavior
     if (state.col) {
       const docs = state.docs;
       if (!docs.length) {
@@ -1689,7 +1944,12 @@ export default function Dashboard() {
   }, []);
 
   const colHasData = !!state.col && state.docs.length > 0;
-  const exportDisabled = state.col ? !colHasData : !(cols && cols.length > 0);
+  // Export is enabled when __all__ has data, specific col has data, or cols list is non-empty
+  const exportDisabled = state.col === "__all__"
+    ? state.docs.length === 0
+    : state.col
+    ? !colHasData
+    : !(cols && cols.length > 0);
 
   const allowedTabs = (() => {
     if (isScanner) return ["scanner"] as const;
@@ -1716,6 +1976,19 @@ export default function Dashboard() {
           );
           const docStatus = getDocStatus(doc);
           const isActive = String(state.selected?._id) === String(doc._id);
+          const eventName = (doc as any).__eventName as string | undefined;
+          const txId = String(
+            doc.transactionId ?? doc.transaction_id ?? doc.utr ??
+            doc.upiTransactionId ?? doc.paymentId ?? doc.txnId ?? ""
+          );
+          const docCol = state.col === "__all__"
+            ? String((doc as any).__col ?? "")
+            : undefined;
+
+          // PDF match status – only computed when a PDF has been uploaded
+          const pdfActive = !!pdfTxIds && pdfTxIds.size > 0;
+          const hasMatch = pdfActive && docMatchesPdf(doc, pdfTxIds);
+
           return (
             <li
               key={String(doc._id)}
@@ -1723,7 +1996,6 @@ export default function Dashboard() {
               onClick={() => {
                 const clickedId = String(doc._id);
                 if (isActive) {
-                  // Same participant clicked again – close detail panel
                   setState((prev) => ({
                     ...prev,
                     selected: null,
@@ -1731,12 +2003,45 @@ export default function Dashboard() {
                   }));
                   pushUrl(state.col, null);
                 } else {
-                  selectDoc(clickedId);
+                  selectDoc(clickedId, undefined, docCol);
                 }
               }}
             >
               <div className="list-item-name">{name}</div>
               {email && <div className="list-item-sub">{email}</div>}
+              {eventName && (
+                <div style={{ fontSize: 11, color: "var(--accent)", marginTop: 2 }}>
+                  <i className="fas fa-calendar-alt" style={{ marginRight: 4 }} />
+                  {eventName}
+                </div>
+              )}
+              {txId && (
+                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+                  <i className="fas fa-receipt" style={{ marginRight: 4 }} />
+                  {txId}
+                </div>
+              )}
+              {/* PDF match badge – shown on every attendee when a PDF is active */}
+              {pdfActive && (
+                <div
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                    marginTop: 4,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    padding: "2px 8px",
+                    borderRadius: 20,
+                    background: hasMatch ? "var(--green)22" : "var(--red)18",
+                    color: hasMatch ? "var(--green)" : "var(--red)",
+                    border: `1px solid ${hasMatch ? "var(--green)55" : "var(--red)44"}`,
+                  }}
+                >
+                  <i className={`fas fa-${hasMatch ? "check-circle" : "times-circle"}`} />
+                  {hasMatch ? "ID Match" : "No ID Found"}
+                </div>
+              )}
               <div className="list-item-meta">
                 {regId ? (
                   <span style={{ fontSize: 11, color: "var(--muted)" }}>
@@ -1785,6 +2090,7 @@ export default function Dashboard() {
               disabled={!state.db}
             >
               <option value="">Select Collection</option>
+              <option value="__all__">⚡ All Events</option>
               {cols.map((c) => (
                 <option key={c} value={c}>
                   {getEventDisplayName(c)}
@@ -1950,7 +2256,11 @@ export default function Dashboard() {
           >
             <div className="sidebar-head">
               <span className="sidebar-title">
-                {state.col ? getEventDisplayName(state.col) : "All Records"}
+                {state.col === "__all__"
+                  ? "⚡ All Events"
+                  : state.col
+                  ? getEventDisplayName(state.col)
+                  : "All Records"}
               </span>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span className="badge">{state.filtered.length}</span>
@@ -1981,13 +2291,89 @@ export default function Dashboard() {
                 <option value="checked_in">Checked In</option>
               </select>
             </div>
+            {/* Search – includes transaction ID matching */}
             <div className="search-wrap">
               <input
                 type="text"
-                placeholder="🔍 Search..."
+                placeholder="🔍 Search name, email or transaction ID..."
                 value={searchQ}
                 onChange={(e) => setSearchQ(e.target.value)}
               />
+            </div>
+            {/* PDF bank-statement filter */}
+            <div
+              style={{
+                padding: "8px 12px",
+                borderBottom: "1px solid var(--border)",
+              }}
+            >
+              <input
+                ref={pdfInputRef}
+                type="file"
+                accept=".pdf"
+                style={{ display: "none" }}
+                onChange={handlePdfUpload}
+              />
+              {pdfTxIds ? (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    fontSize: 12,
+                    background: "var(--accent)18",
+                    border: "1px solid var(--accent)44",
+                    borderRadius: 8,
+                    padding: "6px 10px",
+                  }}
+                >
+                  <i
+                    className="fas fa-file-pdf"
+                    style={{ color: "var(--red)" }}
+                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: "var(--accent)", fontWeight: 600, fontSize: 11 }}>
+                      {state.filtered.filter((d) => docMatchesPdf(d, pdfTxIds)).length}
+                      {" / "}{state.filtered.length} attendees matched
+                    </div>
+                    <div style={{ color: "var(--muted)", fontSize: 10, marginTop: 1 }}>
+                      {pdfTxIds?.size ?? 0} transaction ID(s) from PDF
+                    </div>
+                  </div>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ padding: "2px 6px", fontSize: 10 }}
+                    onClick={() => setShowPdfIds(true)}
+                    title="View extracted IDs"
+                  >
+                    <i className="fas fa-list" />
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ padding: "2px 6px", fontSize: 10 }}
+                    onClick={() => {
+                      setPdfTxIds(null);
+                      setPdfFileName("");
+                      setPdfTxIdList([]);
+                    }}
+                    title="Clear filter"
+                  >
+                    <i className="fas fa-times" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  className="btn btn-ghost btn-sm"
+                  style={{ width: "100%", fontSize: 12 }}
+                  onClick={() => pdfInputRef.current?.click()}
+                >
+                  <i
+                    className="fas fa-file-pdf"
+                    style={{ color: "var(--red)", marginRight: 6 }}
+                  />
+                  Upload Bank Statement PDF
+                </button>
+              )}
             </div>
             <ResultsList />
           </div>
@@ -2025,10 +2411,51 @@ export default function Dashboard() {
                   <input
                     type="text"
                     className="form-input"
-                    placeholder="🔍 Search..."
+                    placeholder="🔍 Search name, email or transaction ID..."
                     value={searchQ}
                     onChange={(e) => setSearchQ(e.target.value)}
                   />
+                </div>
+                {/* Mobile PDF filter */}
+                <div style={{ marginTop: 8 }}>
+                  {pdfTxIds ? (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        fontSize: 12,
+                        background: "var(--accent)18",
+                        border: "1px solid var(--accent)44",
+                        borderRadius: 8,
+                        padding: "6px 10px",
+                      }}
+                    >
+                      <i className="fas fa-file-pdf" style={{ color: "var(--red)" }} />
+                      <span style={{ flex: 1, color: "var(--accent)", fontWeight: 600 }}>
+                        PDF: {pdfTxIds.size} ID(s) matched
+                      </span>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        style={{ padding: "2px 8px", fontSize: 11 }}
+                        onClick={() => { setPdfTxIds(null); setPdfFileName(""); setPdfTxIdList([]); }}
+                      >
+                        <i className="fas fa-times" /> Clear
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      style={{ width: "100%", fontSize: 12 }}
+                      onClick={() => pdfInputRef.current?.click()}
+                    >
+                      <i
+                        className="fas fa-file-pdf"
+                        style={{ color: "var(--red)", marginRight: 6 }}
+                      />
+                      Upload Bank Statement PDF
+                    </button>
+                  )}
                 </div>
               </div>
             )}
@@ -2043,14 +2470,16 @@ export default function Dashboard() {
                 onEdit={openEditModal}
                 onDelete={openDeleteModal}
                 onResend={async (id: string) => {
+                  const col = effectiveCol();
                   showLoading("Resending email...");
                   try {
                     await api(
                       "POST",
-                      `/databases/${state.db}/collections/${state.col}/documents/${id}/resend`,
+                      `/databases/${state.db}/collections/${col}/documents/${id}/resend`,
                     );
                     toast("Email resent to attendee.", "success");
-                    await loadDocs(state.db, state.col);
+                    if (state.col !== "__all__") await loadDocs(state.db, col);
+                    else await loadAllDocs();
                     await selectDoc(id);
                   } catch (e: unknown) {
                     toast((e as Error).message, "error");
@@ -2065,9 +2494,15 @@ export default function Dashboard() {
                 <div className="placeholder-icon">
                   <i className="fas fa-database" />
                 </div>
-                <h3>Select a collection to begin</h3>
+                <h3>
+                  {state.col === "__all__"
+                    ? "Showing all events"
+                    : "Select a collection to begin"}
+                </h3>
                 <p style={{ fontSize: 14, marginTop: 8 }}>
-                  Choose a database and collection from the header
+                  {state.col === "__all__"
+                    ? "All event attendees are listed below. Use search or upload a PDF to filter by transaction ID."
+                    : "Choose a database and collection from the header"}
                 </p>
               </div>
             ) : null}
@@ -2222,6 +2657,86 @@ export default function Dashboard() {
         </div>
       )}
       {/* Users are managed on a dedicated page: /admin/manage-users */}
+
+      {/* ── PDF Extracted IDs Modal ── */}
+      {showPdfIds && (
+        <div className="modal-overlay open">
+          <div className="modal" style={{ minWidth: 420, maxWidth: "90vw" }}>
+            <div className="modal-title">
+              <i className="fas fa-file-pdf" style={{ color: "var(--red)" }} />{" "}
+              Extracted Transaction IDs from PDF
+            </div>
+            <p style={{ color: "var(--muted)", fontSize: 13, marginBottom: 12 }}>
+              {pdfTxIdList.length} transaction ID(s) found in &quot;{pdfFileName}&quot;.
+              Attendees whose records contain any of these IDs are shown in the list.
+            </p>
+            <div
+              style={{
+                maxHeight: 320,
+                overflowY: "auto",
+                background: "var(--bg)",
+                borderRadius: 8,
+                padding: 12,
+                fontFamily: "monospace",
+                fontSize: 13,
+              }}
+            >
+              {pdfTxIdList.map((id, i) => {
+                const matchCount = state.docs.filter((d) => {
+                  const allVals = Object.values(d).map((v) =>
+                    String(v ?? "").toLowerCase(),
+                  );
+                  return allVals.some((f) => f.includes(id.toLowerCase()));
+                }).length;
+                return (
+                  <div
+                    key={i}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      padding: "4px 0",
+                      borderBottom: "1px solid var(--border)",
+                    }}
+                  >
+                    <span style={{ color: "var(--accent)" }}>{id}</span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: matchCount > 0 ? "var(--green)" : "var(--muted)",
+                        fontFamily: "sans-serif",
+                      }}
+                    >
+                      {matchCount > 0
+                        ? `✓ ${matchCount} match${matchCount > 1 ? "es" : ""}`
+                        : "no match"}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="modal-actions" style={{ marginTop: 16 }}>
+              <button
+                className="btn btn-ghost"
+                onClick={() => setShowPdfIds(false)}
+              >
+                Close
+              </button>
+              <button
+                className="btn btn-danger btn-sm"
+                onClick={() => {
+                  setPdfTxIds(null);
+                  setPdfFileName("");
+                  setPdfTxIdList([]);
+                  setShowPdfIds(false);
+                }}
+              >
+                <i className="fas fa-times" /> Clear Filter
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

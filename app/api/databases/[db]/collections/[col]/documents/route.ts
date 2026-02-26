@@ -27,7 +27,6 @@ export async function GET(
       .db(db)
       .collection(col)
       .find({})
-      .limit(500)
       .toArray();
     return NextResponse.json(docs);
   } catch (e: unknown) {
