@@ -2090,7 +2090,7 @@ export default function Dashboard() {
               disabled={!state.db}
             >
               <option value="">Select Collection</option>
-              <option value="__all__">⚡ All Events</option>
+              <option value="__all__">All Events</option>
               {cols.map((c) => (
                 <option key={c} value={c}>
                   {getEventDisplayName(c)}
