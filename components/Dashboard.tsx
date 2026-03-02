@@ -2117,6 +2117,7 @@ export default function Dashboard() {
                 disabled={!cols.length}
               >
                 <option value="">Select Event</option>
+                <option value="__all__">All Events</option>
                 {cols.map((c) => (
                   <option key={c} value={c}>
                     {getEventDisplayName(c)}
@@ -2300,8 +2301,8 @@ export default function Dashboard() {
                 onChange={(e) => setSearchQ(e.target.value)}
               />
             </div>
-            {/* PDF bank-statement filter */}
-            <div
+            {/* PDF bank-statement filter – admin only */}
+            {isAdmin && <div
               style={{
                 padding: "8px 12px",
                 borderBottom: "1px solid var(--border)",
@@ -2374,7 +2375,7 @@ export default function Dashboard() {
                   Upload Bank Statement PDF
                 </button>
               )}
-            </div>
+            </div>}
             <ResultsList />
           </div>
         )}
