@@ -75,6 +75,23 @@ export async function POST(_req: Request, { params }: { params: Promise<{ db: st
       ? `🎟️ Your Event Pass is Confirmed — 6 March 2026 | ${APP_NAME}`
       : `🎉 You're In! ${displayName} — 5 March 2026 | ${APP_NAME}`;
 
+    const eventDateHtml = eventIsPass
+      ? `<div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:14px">
+          <span style="font-size:20px;flex-shrink:0">📅</span>
+          <div>
+            <div style="font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px">Event Date</div>
+            <div style="font-size:15px;color:#e2e8f0;font-weight:700">Friday, 6 March 2026</div>
+            <div style="font-size:12px;color:#f59e0b;margin-top:2px">⚠️ This pass is valid exclusively for 6 March 2026</div>
+          </div>
+        </div>`
+      : `<div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:14px">
+          <span style="font-size:20px;flex-shrink:0">📅</span>
+          <div>
+            <div style="font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px">Workshop Date</div>
+            <div style="font-size:15px;color:#e2e8f0;font-weight:700">Thursday, 5 March 2026</div>
+          </div>
+        </div>`;
+
     const detailsHtml = [
       detailRow('👤 Name', fullName),
       detailRow('📧 Email', email),
@@ -202,14 +219,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ db: st
       <h3 style="margin:0 0 18px;color:#a78bfa;font-size:13px;text-transform:uppercase;letter-spacing:1.5px;font-weight:800">
         ✦ Event Information
       </h3>
-      <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:14px">
-        <span style="font-size:20px;flex-shrink:0">📅</span>
-        <div>
-          <div style="font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px">Event Date</div>
-          <div style="font-size:15px;color:#e2e8f0;font-weight:700">Friday, 6 March 2026</div>
-          ${eventIsPass ? `<div style="font-size:12px;color:#f59e0b;margin-top:2px">⚠️ This pass is valid exclusively for 6 March 2026</div>` : ''}
-        </div>
-      </div>
+      ${eventDateHtml}
     </div>
 
     <!-- ATTENDEE DETAILS CARD -->
