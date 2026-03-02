@@ -177,12 +177,14 @@ export async function POST(
         ? WHATSAPP_COMMUNITY_LINK_PORTPASS
         : WHATSAPP_COMMUNITY_LINK;
 
-      let whatsappQrDataUrl = '';
+      let whatsappQrCid = '';
+      let whatsappQrBuffer: Buffer | null = null;
       if (whatsappLink) {
         try {
-          whatsappQrDataUrl = await QRCode.toDataURL(whatsappLink, { errorCorrectionLevel: 'H' as const, margin: 1, width: 200 });
+          whatsappQrBuffer = await QRCode.toBuffer(whatsappLink, { errorCorrectionLevel: 'H' as const, margin: 1, width: 200 });
+          whatsappQrCid = `whatsapp_qr_${params_.id}@eventmanager`;
         } catch (e) {
-          whatsappQrDataUrl = '';
+          whatsappQrCid = '';
         }
       }
 
@@ -190,7 +192,7 @@ export async function POST(
         ? `
           <div style="margin-top:6px;text-align:center;margin-bottom:18px">
             <a href="${whatsappLink}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#25D366;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:700">Join our WhatsApp Community</a>
-            ${whatsappQrDataUrl ? `<div style="margin-top:10px"><img src="${whatsappQrDataUrl}" alt="Join WhatsApp" style="width:140px;height:140px;border-radius:8px;display:block;margin:8px auto 0"/></div>` : ''}
+            ${whatsappQrCid ? `<div style="margin-top:10px"><img src="cid:${whatsappQrCid}" alt="Join WhatsApp" style="width:140px;height:140px;border-radius:8px;display:block;margin:8px auto 0"/></div>` : ''}
           </div>`
         : '';
 
@@ -331,17 +333,18 @@ export async function POST(
 </html>`;
 
 
-      await sendMail(
-        email,
-        subject,
-        html,
-        [{
+      const mailAttachments: { filename: string; content: Buffer; contentType: string; cid: string }[] = [
+        {
           filename: `entry_pass_${String(fullName).replace(/\s+/g, '_')}.png`,
           content: qrBuffer,
           contentType: 'image/png',
           cid: qrCid,
-        }]
-      );
+        },
+      ];
+      if (whatsappQrBuffer && whatsappQrCid) {
+        mailAttachments.push({ filename: 'whatsapp_community_qr.png', content: whatsappQrBuffer, contentType: 'image/png', cid: whatsappQrCid });
+      }
+      await sendMail(email, subject, html, mailAttachments);
     }
 
     return NextResponse.json({ success: true, qrCode: qrDataUrl });

@@ -124,12 +124,14 @@ export async function POST(_req: Request, { params }: { params: Promise<{ db: st
       ? WHATSAPP_COMMUNITY_LINK_PORTPASS
       : WHATSAPP_COMMUNITY_LINK;
 
-    let whatsappQrDataUrl = '';
+    let whatsappQrCid = '';
     if (whatsappLink) {
       try {
-        whatsappQrDataUrl = await QRCode.toDataURL(whatsappLink, { errorCorrectionLevel: 'H' as const, margin: 1, width: 200 });
+        const whatsappQrBuffer = await QRCode.toBuffer(whatsappLink, { errorCorrectionLevel: 'H' as const, margin: 1, width: 200 });
+        whatsappQrCid = `whatsapp_qr_${id}@eventmanager`;
+        attachments.push({ filename: 'whatsapp_community_qr.png', content: whatsappQrBuffer, contentType: 'image/png', cid: whatsappQrCid });
       } catch (e) {
-        whatsappQrDataUrl = '';
+        whatsappQrCid = '';
       }
     }
 
@@ -152,7 +154,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ db: st
       ? `
         <div style="margin-top:6px;text-align:center;margin-bottom:18px">
           <a href="${whatsappLink}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#25D366;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:700">Join our WhatsApp Community</a>
-          ${whatsappQrDataUrl ? `<div style="margin-top:10px"><img src="${whatsappQrDataUrl}" alt="Join WhatsApp" style="width:140px;height:140px;border-radius:8px;display:block;margin:8px auto 0"/></div>` : ''}
+          ${whatsappQrCid ? `<div style="margin-top:10px"><img src="cid:${whatsappQrCid}" alt="Join WhatsApp" style="width:140px;height:140px;border-radius:8px;display:block;margin:8px auto 0"/></div>` : ''}
         </div>`
       : '';
 
@@ -181,6 +183,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ db: st
       .detail-label  { font-size: 11px !important; padding: 8px 12px 8px 0 !important; width: 38% !important; }
       .detail-value  { font-size: 13px !important; padding: 8px 0 !important; }
       .event-badge   { padding: 8px 18px !important; font-size: 15px !important; }
+      .tip-pad       { padding: 14px 16px !important; }
       .details-table td { display:block !important; width:100% !important; padding:8px 0 !important; box-sizing:border-box; }
       .details-table td:first-child { padding-right:0 !important; }
       .detail-row td { display:block !important; width:100% !important; }
@@ -211,7 +214,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ db: st
       Hello, <strong class="greeting-name" style="color:#a78bfa;font-size:19px">${fullName}</strong> 👋
     </p>
     <p style="color:#94a3b8;font-size:14px;margin:0 0 28px;line-height:1.7">
-      We&rsquo;re resending your registration details &mdash; keep this email handy on your big day.
+      We&rsquo;re delighted to welcome you! Here are your complete registration details &mdash; keep this email handy on your big day.
     </p>
 
     <!-- EVENT INFO CARD -->
@@ -220,6 +223,14 @@ export async function POST(_req: Request, { params }: { params: Promise<{ db: st
         ✦ Event Information
       </h3>
       ${eventDateHtml}
+      <div style="display:flex;align-items:flex-start;gap:12px">
+        <span style="font-size:20px;flex-shrink:0">📍</span>
+        <div>
+          <div style="font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px">Venue</div>
+          <div style="font-size:15px;color:#e2e8f0;font-weight:700">Sona College of Technology</div>
+          <div style="font-size:13px;color:#94a3b8;margin-top:2px">Department of Information Technology</div>
+        </div>
+      </div>
     </div>
 
     <!-- ATTENDEE DETAILS CARD -->
@@ -233,16 +244,30 @@ export async function POST(_req: Request, { params }: { params: Promise<{ db: st
     </div>
 
     <!-- QR CODE CARD -->
-    ${qrDataUrl ? `
     <div class="qr-card" style="background:linear-gradient(160deg,#0f172a 0%,#1e1b4b 50%,#0f172a 100%);border:2px solid #6366f1;border-radius:20px;padding:36px 24px;text-align:center;margin-bottom:24px;box-shadow:0 0 60px rgba(99,102,241,0.2) inset">
-      <h3 style="margin:0 0 8px;color:#fff;font-size:22px;font-weight:900;letter-spacing:-0.5px">🎫 Your Entry Pass QR</h3>
-      <p style="color:#94a3b8;font-size:13px;margin:0 0 24px;line-height:1.6">Show this QR code at the entrance for check-in.</p>
+      <h3 style="margin:0 0 8px;color:#fff;font-size:22px;font-weight:900;letter-spacing:-0.5px">
+        🎫 Your Entry Pass QR
+      </h3>
+      <p style="color:#94a3b8;font-size:13px;margin:0 0 24px;line-height:1.6">
+        Show this QR code at the entrance for check-in.
+      </p>
       <div style="display:inline-block;background:#fff;padding:16px;border-radius:16px;box-shadow:0 0 40px rgba(99,102,241,0.4),0 16px 32px rgba(0,0,0,0.4)">
         <img class="qr-img" src="cid:${qrCid}" alt="Entry QR Code" style="width:220px;height:220px;display:block;border-radius:6px"/>
       </div>
-      <p style="color:#f1f5f9;font-size:15px;font-weight:700;margin:22px 0 8px">🚪 Present this QR at the entrance</p>
-      <p style="color:#64748b;font-size:13px;margin:0;line-height:1.6">Your QR is also attached as a PNG &mdash; save it to your phone for easy check-in.</p>
-    </div>` : ''}
+      <p style="color:#f1f5f9;font-size:15px;font-weight:700;margin:22px 0 8px;letter-spacing:0.2px">
+        🚪 Present this QR at the entrance
+      </p>
+      <p style="color:#64748b;font-size:13px;margin:0;line-height:1.6">
+        Your QR is also attached as a PNG &mdash; save it to your phone for easy check-in.
+      </p>
+    </div>
+
+    <!-- PRO TIP -->
+    <div class="tip-pad" style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.25);border-radius:12px;padding:16px 20px">
+      <p style="margin:0;font-size:13px;color:#fbbf24;line-height:1.6">
+        <strong>💡 Pro Tip:</strong> Screenshot or download the attached PNG QR code and keep it accessible on your phone for the fastest check-in experience.
+      </p>
+    </div>
 
     ${whatsappHtml}
     ${coordinatorsHtml}
