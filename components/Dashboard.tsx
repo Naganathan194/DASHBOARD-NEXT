@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { getEventDisplayName } from "@/lib/events";
@@ -49,9 +49,26 @@ const formatKey = (k: string) =>
     .trim()
     .replace(/\b\w/g, (l) => l.toUpperCase());
 
+// Known field-key variants that represent payment mode – always exported as "Payment Mode"
+const PAYMENT_MODE_KEYS = new Set([
+  "paymentMode",
+  "payment_mode",
+  "modeOfPayment",
+  "mode_of_payment",
+  "payMode",
+  "pay_mode",
+  "transactionMode",
+  "transaction_mode",
+]);
+
+// Returns the human-readable column header for a given document key
+const getColHeader = (k: string): string => {
+  if (k === "__eventName") return "Event Name";
+  if (PAYMENT_MODE_KEYS.has(k)) return "Payment Mode";
+  return formatKey(k);
+};
+
 const formatColName = (n: string) => getEventDisplayName(n);
-
-
 
 const getDocName = (doc: Doc): string => {
   for (const k of [
@@ -307,11 +324,30 @@ function DocDetail({
       <div className="detail-card">
         <div className="detail-header">
           <div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 4,
+              }}
+            >
               <div className="detail-name">{name}</div>
               {stats && (
-                <div style={{ fontSize: 12, padding: "4px 12px", background: "var(--accent)", color: "white", borderRadius: 20 }}>
-                  <i className="fas fa-hourglass-half" style={{ marginRight: 6 }} /> {stats.pending} Pending
+                <div
+                  style={{
+                    fontSize: 12,
+                    padding: "4px 12px",
+                    background: "var(--accent)",
+                    color: "white",
+                    borderRadius: 20,
+                  }}
+                >
+                  <i
+                    className="fas fa-hourglass-half"
+                    style={{ marginRight: 6 }}
+                  />{" "}
+                  {stats.pending} Pending
                 </div>
               )}
             </div>
@@ -455,8 +491,9 @@ function DocDetail({
                   Attendee uses this to check in
                 </p>
                 {doc.checkInTime != null && (
-                  <div style={{ fontSize: 12, color: 'var(--blue)' }}>
-                    <i className="fas fa-clock" /> Checked in: {formatDateTime(String(doc.checkInTime))}
+                  <div style={{ fontSize: 12, color: "var(--blue)" }}>
+                    <i className="fas fa-clock" /> Checked in:{" "}
+                    {formatDateTime(String(doc.checkInTime))}
                   </div>
                 )}
                 <a
@@ -545,8 +582,8 @@ function ScannerPanel({
           console.warn("scanner stop error", err);
         });
         try {
-          await inst.clear().catch(() => { });
-        } catch { }
+          await inst.clear().catch(() => {});
+        } catch {}
         scannerRef.current = null;
       }
     } catch (err) {
@@ -563,7 +600,7 @@ function ScannerPanel({
       if (scannerRef.current) {
         try {
           await (scannerRef.current as any).stop();
-        } catch { }
+        } catch {}
         scannerRef.current = null;
       }
 
@@ -621,7 +658,7 @@ function ScannerPanel({
       setScanning(false);
       try {
         await stopScanner();
-      } catch { }
+      } catch {}
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stopScanner, onToast]);
@@ -676,8 +713,18 @@ function ScannerPanel({
 
       setScanResult(
         <div className={`scan-result success`}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-            <i className="fas fa-user-circle" style={{ fontSize: 36, color: 'var(--accent)' }} />
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              marginBottom: 12,
+            }}
+          >
+            <i
+              className="fas fa-user-circle"
+              style={{ fontSize: 36, color: "var(--accent)" }}
+            />
             <div>
               <div className="scan-attendee-name">{name}</div>
               {eventName ? (
@@ -693,13 +740,29 @@ function ScannerPanel({
             </div>
           </div>
           {/* Event / Workshop name */}
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.4)', borderRadius: 20, padding: '4px 12px', fontSize: 12, color: 'var(--accent)', fontWeight: 600, marginBottom: 12 }}>
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              background: "rgba(99,102,241,0.15)",
+              border: "1px solid rgba(99,102,241,0.4)",
+              borderRadius: 20,
+              padding: "4px 12px",
+              fontSize: 12,
+              color: "var(--accent)",
+              fontWeight: 600,
+              marginBottom: 12,
+            }}
+          >
             <i className="fas fa-calendar-star" />
             {getEventDisplayName(r.collection)}
           </div>
-          <div className={`checkin-status ${alreadyIn ? 'in' : 'out'}`}>
-            <i className={`fas fa-${alreadyIn ? 'check-circle' : 'clock'}`} />
-            {alreadyIn ? `Already Checked In at ${formatDateTime(String(doc.checkInTime))}` : 'Not Yet Checked In'}
+          <div className={`checkin-status ${alreadyIn ? "in" : "out"}`}>
+            <i className={`fas fa-${alreadyIn ? "check-circle" : "clock"}`} />
+            {alreadyIn
+              ? `Already Checked In at ${formatDateTime(String(doc.checkInTime))}`
+              : "Not Yet Checked In"}
           </div>
           <div
             style={{
@@ -1005,13 +1068,13 @@ export default function Dashboard() {
         PERSIST_KEY,
         JSON.stringify({ ...p, _ts: Date.now() }),
       );
-    } catch { }
+    } catch {}
   };
   const clearPersist = () => {
     if (typeof window === "undefined") return;
     try {
       sessionStorage.removeItem(PERSIST_KEY);
-    } catch { }
+    } catch {}
   };
 
   const toast = useCallback(
@@ -1043,7 +1106,7 @@ export default function Dashboard() {
     }
     try {
       clearPersist();
-    } catch { }
+    } catch {}
     pushUrl(null, null);
     router.replace("/login");
   };
@@ -1153,8 +1216,16 @@ export default function Dashboard() {
         const email = getDocEmail(d).toLowerCase();
         // Gather all known transaction-ID-like fields into one string for matching
         const txField = String(
-          d.transactionId ?? d.transaction_id ?? d.utr ?? d.upiTransactionId ??
-          d.paymentId ?? d.payment_id ?? d.txnId ?? d.txn_id ?? d.referenceId ?? ""
+          d.transactionId ??
+            d.transaction_id ??
+            d.utr ??
+            d.upiTransactionId ??
+            d.paymentId ??
+            d.payment_id ??
+            d.txnId ??
+            d.txn_id ??
+            d.referenceId ??
+            "",
         ).toLowerCase();
         const matchQ =
           !q ||
@@ -1263,7 +1334,7 @@ export default function Dashboard() {
     };
     try {
       writePersist(toSave);
-    } catch { }
+    } catch {}
   }, [state.col, filterStatus, state.selected]);
 
   // ── DB change ─────────────────────────────────────────────────────────────
@@ -1412,8 +1483,12 @@ export default function Dashboard() {
         }
       }
       const sorted = allDocs.sort((a, b) => {
-        const ra = String(a.registrationId ?? a.regId ?? a.registerNumber ?? "");
-        const rb = String(b.registrationId ?? b.regId ?? b.registerNumber ?? "");
+        const ra = String(
+          a.registrationId ?? a.regId ?? a.registerNumber ?? "",
+        );
+        const rb = String(
+          b.registrationId ?? b.regId ?? b.registerNumber ?? "",
+        );
         return ra.localeCompare(rb, undefined, { numeric: true });
       });
       // Compute stats client-side from merged docs
@@ -1422,9 +1497,8 @@ export default function Dashboard() {
         approved: sorted.filter((d) => d.status === "approved").length,
         rejected: sorted.filter((d) => d.status === "rejected").length,
         checkedIn: sorted.filter((d) => !!d.checkedIn).length,
-        pending: sorted.filter(
-          (d) => !d.status || d.status === "pending",
-        ).length,
+        pending: sorted.filter((d) => !d.status || d.status === "pending")
+          .length,
       };
       setState((prev) => ({
         ...prev,
@@ -1449,8 +1523,7 @@ export default function Dashboard() {
       // Use locally served worker (copied to /public at build time) to avoid
       // CDN fetch failures in all environments including localhost.
       (pdfjsLib as any).GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
-      const pdf = await (pdfjsLib as any)
-        .getDocument({ data: arrayBuffer })
+      const pdf = await (pdfjsLib as any).getDocument({ data: arrayBuffer })
         .promise;
 
       // Collect every text token from every page individually (not joined)
@@ -1501,9 +1574,7 @@ export default function Dashboard() {
   };
 
   // ── handle PDF upload by user ──────────────────────────────────────────────
-  const handlePdfUpload = async (
-    e: React.ChangeEvent<HTMLInputElement>,
-  ) => {
+  const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setPdfFileName(file.name);
@@ -1518,7 +1589,10 @@ export default function Dashboard() {
     } else {
       setPdfTxIds(new Set(ids));
       setPdfTxIdList(ids);
-      toast(`Found ${ids.length} transaction ID(s) in PDF – filtering list`, "success");
+      toast(
+        `Found ${ids.length} transaction ID(s) in PDF – filtering list`,
+        "success",
+      );
     }
     // Reset file input so the same file can be re-uploaded
     if (pdfInputRef.current) pdfInputRef.current.value = "";
@@ -1533,7 +1607,9 @@ export default function Dashboard() {
       : (() => {
           if (state.col === "__all__") {
             const found = state.docs.find((d) => String(d._id) === id);
-            return found ? String((found as any).__col ?? state.col) : state.col;
+            return found
+              ? String((found as any).__col ?? state.col)
+              : state.col;
           }
           return state.col;
         })();
@@ -1754,16 +1830,19 @@ export default function Dashboard() {
     // "__all__" mode: we already have all docs in state – export them directly
     if (state.col === "__all__") {
       const docs = state.filtered.length ? state.filtered : state.docs;
-      if (!docs.length) { toast("No records to export", "info"); return; }
+      if (!docs.length) {
+        toast("No records to export", "info");
+        return;
+      }
       const keysSet = new Set<string>();
       docs.forEach((d) =>
-        Object.keys(d).forEach((k) => { if (!isImageKey(k) && k !== "__col") keysSet.add(k); }),
+        Object.keys(d).forEach((k) => {
+          if (!isImageKey(k) && k !== "__col") keysSet.add(k);
+        }),
       );
       keysSet.delete("__eventName");
       const keys = ["__eventName", ...Array.from(keysSet)];
-      const headerRow = keys.map((k) =>
-        k === "__eventName" ? "Event Name" : formatKey(k),
-      );
+      const headerRow = keys.map(getColHeader);
       const rows = [
         headerRow,
         ...docs.map((d) =>
@@ -1778,8 +1857,15 @@ export default function Dashboard() {
         ),
       ];
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), "All Events");
-      XLSX.writeFile(wb, `all_events_${new Date().toISOString().split("T")[0]}.xlsx`);
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.aoa_to_sheet(rows),
+        "All Events",
+      );
+      XLSX.writeFile(
+        wb,
+        `all_events_${new Date().toISOString().split("T")[0]}.xlsx`,
+      );
       toast("Exported successfully", "success");
       return;
     }
@@ -1790,9 +1876,16 @@ export default function Dashboard() {
         toast("No records to export", "info");
         return;
       }
-      const keys = Object.keys(docs[0]).filter((k) => !isImageKey(k));
+      // Union keys from ALL docs so fields absent in doc[0] are not missed
+      const keysSet = new Set<string>();
+      docs.forEach((d) =>
+        Object.keys(d).forEach((k) => {
+          if (!isImageKey(k)) keysSet.add(k);
+        }),
+      );
+      const keys = Array.from(keysSet);
       const rows = [
-        keys.map(formatKey),
+        keys.map(getColHeader),
         ...docs.map((d) =>
           keys.map((k) => {
             const v = d[k];
@@ -1856,9 +1949,7 @@ export default function Dashboard() {
       // ensure our synthetic event name column is first and has a friendly header
       keysSet.delete("__eventName");
       const keys = ["__eventName", ...Array.from(keysSet)];
-      const headerRow = keys.map((k) =>
-        k === "__eventName" ? "Event Name" : formatKey(k),
-      );
+      const headerRow = keys.map(getColHeader);
 
       const rows = [
         headerRow,
@@ -1945,11 +2036,12 @@ export default function Dashboard() {
 
   const colHasData = !!state.col && state.docs.length > 0;
   // Export is enabled when __all__ has data, specific col has data, or cols list is non-empty
-  const exportDisabled = state.col === "__all__"
-    ? state.docs.length === 0
-    : state.col
-    ? !colHasData
-    : !(cols && cols.length > 0);
+  const exportDisabled =
+    state.col === "__all__"
+      ? state.docs.length === 0
+      : state.col
+        ? !colHasData
+        : !(cols && cols.length > 0);
 
   const allowedTabs = (() => {
     if (isScanner) return ["scanner"] as const;
@@ -1959,7 +2051,11 @@ export default function Dashboard() {
 
   // ── render ────────────────────────────────────────────────────────────────
   // Results list component (rendered in sidebar on desktop, in main on mobile)
-  const ResultsList = () => (
+  const ResultsList = ({
+    inlineExpand = false,
+  }: {
+    inlineExpand?: boolean;
+  }) => (
     <ul className="list">
       {state.filtered.length === 0 ? (
         <li className="empty">
@@ -1978,81 +2074,140 @@ export default function Dashboard() {
           const isActive = String(state.selected?._id) === String(doc._id);
           const eventName = (doc as any).__eventName as string | undefined;
           const txId = String(
-            doc.transactionId ?? doc.transaction_id ?? doc.utr ??
-            doc.upiTransactionId ?? doc.paymentId ?? doc.txnId ?? ""
+            doc.transactionId ??
+              doc.transaction_id ??
+              doc.utr ??
+              doc.upiTransactionId ??
+              doc.paymentId ??
+              doc.txnId ??
+              "",
           );
-          const docCol = state.col === "__all__"
-            ? String((doc as any).__col ?? "")
-            : undefined;
+          const docCol =
+            state.col === "__all__"
+              ? String((doc as any).__col ?? "")
+              : undefined;
 
           // PDF match status – only computed when a PDF has been uploaded
           const pdfActive = !!pdfTxIds && pdfTxIds.size > 0;
           const hasMatch = pdfActive && docMatchesPdf(doc, pdfTxIds);
 
           return (
-            <li
-              key={String(doc._id)}
-              className={`list-item${isActive ? " active" : ""}`}
-              onClick={() => {
-                const clickedId = String(doc._id);
-                if (isActive) {
-                  setState((prev) => ({
-                    ...prev,
-                    selected: null,
-                    details: null,
-                  }));
-                  pushUrl(state.col, null);
-                } else {
-                  selectDoc(clickedId, undefined, docCol);
-                }
-              }}
-            >
-              <div className="list-item-name">{name}</div>
-              {email && <div className="list-item-sub">{email}</div>}
-              {eventName && (
-                <div style={{ fontSize: 11, color: "var(--accent)", marginTop: 2 }}>
-                  <i className="fas fa-calendar-alt" style={{ marginRight: 4 }} />
-                  {eventName}
-                </div>
-              )}
-              {txId && (
-                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
-                  <i className="fas fa-receipt" style={{ marginRight: 4 }} />
-                  {txId}
-                </div>
-              )}
-              {/* PDF match badge – shown on every attendee when a PDF is active */}
-              {pdfActive && (
-                <div
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 4,
-                    marginTop: 4,
-                    fontSize: 11,
-                    fontWeight: 600,
-                    padding: "2px 8px",
-                    borderRadius: 20,
-                    background: hasMatch ? "var(--green)22" : "var(--red)18",
-                    color: hasMatch ? "var(--green)" : "var(--red)",
-                    border: `1px solid ${hasMatch ? "var(--green)55" : "var(--red)44"}`,
-                  }}
-                >
-                  <i className={`fas fa-${hasMatch ? "check-circle" : "times-circle"}`} />
-                  {hasMatch ? "ID Match" : "No ID Found"}
-                </div>
-              )}
-              <div className="list-item-meta">
-                {regId ? (
-                  <span style={{ fontSize: 11, color: "var(--muted)" }}>
-                    #{regId.substring(0, 10)}
-                  </span>
-                ) : (
-                  <span />
+            <Fragment key={String(doc._id)}>
+              <li
+                className={`list-item${isActive ? " active" : ""}`}
+                onClick={() => {
+                  const clickedId = String(doc._id);
+                  if (isActive) {
+                    setState((prev) => ({
+                      ...prev,
+                      selected: null,
+                      details: null,
+                    }));
+                    pushUrl(state.col, null);
+                  } else {
+                    selectDoc(clickedId, undefined, docCol);
+                  }
+                }}
+              >
+                <div className="list-item-name">{name}</div>
+                {email && <div className="list-item-sub">{email}</div>}
+                {eventName && (
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "var(--accent)",
+                      marginTop: 2,
+                    }}
+                  >
+                    <i
+                      className="fas fa-calendar-alt"
+                      style={{ marginRight: 4 }}
+                    />
+                    {eventName}
+                  </div>
                 )}
-                <StatusPill status={docStatus} />
-              </div>
-            </li>
+                {txId && (
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "var(--muted)",
+                      marginTop: 2,
+                    }}
+                  >
+                    <i className="fas fa-receipt" style={{ marginRight: 4 }} />
+                    {txId}
+                  </div>
+                )}
+                {/* PDF match badge – shown on every attendee when a PDF is active */}
+                {pdfActive && (
+                  <div
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                      marginTop: 4,
+                      fontSize: 11,
+                      fontWeight: 600,
+                      padding: "2px 8px",
+                      borderRadius: 20,
+                      background: hasMatch ? "var(--green)22" : "var(--red)18",
+                      color: hasMatch ? "var(--green)" : "var(--red)",
+                      border: `1px solid ${hasMatch ? "var(--green)55" : "var(--red)44"}`,
+                    }}
+                  >
+                    <i
+                      className={`fas fa-${hasMatch ? "check-circle" : "times-circle"}`}
+                    />
+                    {hasMatch ? "ID Match" : "No ID Found"}
+                  </div>
+                )}
+                <div className="list-item-meta">
+                  {regId ? (
+                    <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                      #{regId.substring(0, 10)}
+                    </span>
+                  ) : (
+                    <span />
+                  )}
+                  <StatusPill status={docStatus} />
+                </div>
+              </li>
+              {/* Inline accordion expansion – only for mobile (inlineExpand mode) */}
+              {inlineExpand && isActive && state.details && (
+                <li
+                  key={`${String(doc._id)}-detail`}
+                  style={{ listStyle: "none", padding: 0 }}
+                >
+                  <DocDetail
+                    doc={state.details}
+                    onApprove={approveDoc}
+                    onOpenReject={openRejectModal}
+                    onEdit={openEditModal}
+                    onDelete={openDeleteModal}
+                    onResend={async (id: string) => {
+                      const col = effectiveCol();
+                      showLoading("Resending email...");
+                      try {
+                        await api(
+                          "POST",
+                          `/databases/${state.db}/collections/${col}/documents/${id}/resend`,
+                        );
+                        toast("Email resent to attendee.", "success");
+                        if (state.col !== "__all__")
+                          await loadDocs(state.db, col);
+                        else await loadAllDocs();
+                        await selectDoc(id);
+                      } catch (e: unknown) {
+                        toast((e as Error).message, "error");
+                      } finally {
+                        hideLoading();
+                      }
+                    }}
+                    isAdmin={isAdmin}
+                  />
+                </li>
+              )}
+            </Fragment>
           );
         })
       )}
@@ -2260,8 +2415,8 @@ export default function Dashboard() {
                 {state.col === "__all__"
                   ? "⚡ All Events"
                   : state.col
-                  ? getEventDisplayName(state.col)
-                  : "All Records"}
+                    ? getEventDisplayName(state.col)
+                    : "All Records"}
               </span>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span className="badge">{state.filtered.length}</span>
@@ -2302,80 +2457,99 @@ export default function Dashboard() {
               />
             </div>
             {/* PDF bank-statement filter – admin only */}
-            {isAdmin && <div
-              style={{
-                padding: "8px 12px",
-                borderBottom: "1px solid var(--border)",
-              }}
-            >
-              <input
-                ref={pdfInputRef}
-                type="file"
-                accept=".pdf"
-                style={{ display: "none" }}
-                onChange={handlePdfUpload}
-              />
-              {pdfTxIds ? (
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                    fontSize: 12,
-                    background: "var(--accent)18",
-                    border: "1px solid var(--accent)44",
-                    borderRadius: 8,
-                    padding: "6px 10px",
-                  }}
-                >
-                  <i
-                    className="fas fa-file-pdf"
-                    style={{ color: "var(--red)" }}
-                  />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ color: "var(--accent)", fontWeight: 600, fontSize: 11 }}>
-                      {state.filtered.filter((d) => docMatchesPdf(d, pdfTxIds)).length}
-                      {" / "}{state.filtered.length} attendees matched
-                    </div>
-                    <div style={{ color: "var(--muted)", fontSize: 10, marginTop: 1 }}>
-                      {pdfTxIds?.size ?? 0} transaction ID(s) from PDF
-                    </div>
-                  </div>
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    style={{ padding: "2px 6px", fontSize: 10 }}
-                    onClick={() => setShowPdfIds(true)}
-                    title="View extracted IDs"
-                  >
-                    <i className="fas fa-list" />
-                  </button>
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    style={{ padding: "2px 6px", fontSize: 10 }}
-                    onClick={() => {
-                      setPdfTxIds(null);
-                      setPdfFileName("");
-                      setPdfTxIdList([]);
+            {isAdmin && (
+              <div
+                style={{
+                  padding: "8px 12px",
+                  borderBottom: "1px solid var(--border)",
+                }}
+              >
+                <input
+                  ref={pdfInputRef}
+                  type="file"
+                  accept=".pdf"
+                  style={{ display: "none" }}
+                  onChange={handlePdfUpload}
+                />
+                {pdfTxIds ? (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      fontSize: 12,
+                      background: "var(--accent)18",
+                      border: "1px solid var(--accent)44",
+                      borderRadius: 8,
+                      padding: "6px 10px",
                     }}
-                    title="Clear filter"
                   >
-                    <i className="fas fa-times" />
+                    <i
+                      className="fas fa-file-pdf"
+                      style={{ color: "var(--red)" }}
+                    />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{
+                          color: "var(--accent)",
+                          fontWeight: 600,
+                          fontSize: 11,
+                        }}
+                      >
+                        {
+                          state.filtered.filter((d) =>
+                            docMatchesPdf(d, pdfTxIds),
+                          ).length
+                        }
+                        {" / "}
+                        {state.filtered.length} attendees matched
+                      </div>
+                      <div
+                        style={{
+                          color: "var(--muted)",
+                          fontSize: 10,
+                          marginTop: 1,
+                        }}
+                      >
+                        {pdfTxIds?.size ?? 0} transaction ID(s) from PDF
+                      </div>
+                    </div>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      style={{ padding: "2px 6px", fontSize: 10 }}
+                      onClick={() => setShowPdfIds(true)}
+                      title="View extracted IDs"
+                    >
+                      <i className="fas fa-list" />
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      style={{ padding: "2px 6px", fontSize: 10 }}
+                      onClick={() => {
+                        setPdfTxIds(null);
+                        setPdfFileName("");
+                        setPdfTxIdList([]);
+                      }}
+                      title="Clear filter"
+                    >
+                      <i className="fas fa-times" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ width: "100%", fontSize: 12 }}
+                    onClick={() => pdfInputRef.current?.click()}
+                  >
+                    <i
+                      className="fas fa-file-pdf"
+                      style={{ color: "var(--red)", marginRight: 6 }}
+                    />
+                    Upload Bank Statement PDF
                   </button>
-                </div>
-              ) : (
-                <button
-                  className="btn btn-ghost btn-sm"
-                  style={{ width: "100%", fontSize: 12 }}
-                  onClick={() => pdfInputRef.current?.click()}
-                >
-                  <i
-                    className="fas fa-file-pdf"
-                    style={{ color: "var(--red)", marginRight: 6 }}
-                  />
-                  Upload Bank Statement PDF
-                </button>
-              )}
-            </div>}
+                )}
+              </div>
+            )}
             <ResultsList />
           </div>
         )}
@@ -2432,14 +2606,27 @@ export default function Dashboard() {
                         padding: "6px 10px",
                       }}
                     >
-                      <i className="fas fa-file-pdf" style={{ color: "var(--red)" }} />
-                      <span style={{ flex: 1, color: "var(--accent)", fontWeight: 600 }}>
+                      <i
+                        className="fas fa-file-pdf"
+                        style={{ color: "var(--red)" }}
+                      />
+                      <span
+                        style={{
+                          flex: 1,
+                          color: "var(--accent)",
+                          fontWeight: 600,
+                        }}
+                      >
                         PDF: {pdfTxIds.size} ID(s) matched
                       </span>
                       <button
                         className="btn btn-ghost btn-sm"
                         style={{ padding: "2px 8px", fontSize: 11 }}
-                        onClick={() => { setPdfTxIds(null); setPdfFileName(""); setPdfTxIdList([]); }}
+                        onClick={() => {
+                          setPdfTxIds(null);
+                          setPdfFileName("");
+                          setPdfTxIdList([]);
+                        }}
                       >
                         <i className="fas fa-times" /> Clear
                       </button>
@@ -2461,52 +2648,56 @@ export default function Dashboard() {
               </div>
             )}
             <div className="mobile-only" style={{ paddingTop: 12 }}>
-              <ResultsList />
+              <ResultsList inlineExpand={true} />
             </div>
-            {state.details ? (
-              <DocDetail
-                doc={state.details}
-                onApprove={approveDoc}
-                onOpenReject={openRejectModal}
-                onEdit={openEditModal}
-                onDelete={openDeleteModal}
-                onResend={async (id: string) => {
-                  const col = effectiveCol();
-                  showLoading("Resending email...");
-                  try {
-                    await api(
-                      "POST",
-                      `/databases/${state.db}/collections/${col}/documents/${id}/resend`,
-                    );
-                    toast("Email resent to attendee.", "success");
-                    if (state.col !== "__all__") await loadDocs(state.db, col);
-                    else await loadAllDocs();
-                    await selectDoc(id);
-                  } catch (e: unknown) {
-                    toast((e as Error).message, "error");
-                  } finally {
-                    hideLoading();
-                  }
-                }}
-                isAdmin={isAdmin}
-              />
-            ) : !state.col ? (
-              <div className="placeholder">
-                <div className="placeholder-icon">
-                  <i className="fas fa-database" />
+            {/* Desktop: detail panel shown alongside sidebar (hidden on mobile via CSS) */}
+            <div className="desktop-only">
+              {state.details ? (
+                <DocDetail
+                  doc={state.details}
+                  onApprove={approveDoc}
+                  onOpenReject={openRejectModal}
+                  onEdit={openEditModal}
+                  onDelete={openDeleteModal}
+                  onResend={async (id: string) => {
+                    const col = effectiveCol();
+                    showLoading("Resending email...");
+                    try {
+                      await api(
+                        "POST",
+                        `/databases/${state.db}/collections/${col}/documents/${id}/resend`,
+                      );
+                      toast("Email resent to attendee.", "success");
+                      if (state.col !== "__all__")
+                        await loadDocs(state.db, col);
+                      else await loadAllDocs();
+                      await selectDoc(id);
+                    } catch (e: unknown) {
+                      toast((e as Error).message, "error");
+                    } finally {
+                      hideLoading();
+                    }
+                  }}
+                  isAdmin={isAdmin}
+                />
+              ) : !state.col ? (
+                <div className="placeholder">
+                  <div className="placeholder-icon">
+                    <i className="fas fa-database" />
+                  </div>
+                  <h3>
+                    {state.col === "__all__"
+                      ? "Showing all events"
+                      : "Select a collection to begin"}
+                  </h3>
+                  <p style={{ fontSize: 14, marginTop: 8 }}>
+                    {state.col === "__all__"
+                      ? "All event attendees are listed below. Use search or upload a PDF to filter by transaction ID."
+                      : "Choose a database and collection from the header"}
+                  </p>
                 </div>
-                <h3>
-                  {state.col === "__all__"
-                    ? "Showing all events"
-                    : "Select a collection to begin"}
-                </h3>
-                <p style={{ fontSize: 14, marginTop: 8 }}>
-                  {state.col === "__all__"
-                    ? "All event attendees are listed below. Use search or upload a PDF to filter by transaction ID."
-                    : "Choose a database and collection from the header"}
-                </p>
-              </div>
-            ) : null}
+              ) : null}
+            </div>
           </div>
         </div>
 
@@ -2667,9 +2858,12 @@ export default function Dashboard() {
               <i className="fas fa-file-pdf" style={{ color: "var(--red)" }} />{" "}
               Extracted Transaction IDs from PDF
             </div>
-            <p style={{ color: "var(--muted)", fontSize: 13, marginBottom: 12 }}>
-              {pdfTxIdList.length} transaction ID(s) found in &quot;{pdfFileName}&quot;.
-              Attendees whose records contain any of these IDs are shown in the list.
+            <p
+              style={{ color: "var(--muted)", fontSize: 13, marginBottom: 12 }}
+            >
+              {pdfTxIdList.length} transaction ID(s) found in &quot;
+              {pdfFileName}&quot;. Attendees whose records contain any of these
+              IDs are shown in the list.
             </p>
             <div
               style={{
