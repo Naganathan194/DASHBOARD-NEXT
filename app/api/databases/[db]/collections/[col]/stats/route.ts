@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { connectToMongo } from '@/lib/mongodb';
 import { isAllowedCollection } from '@/lib/registrationCollections';
 import { authorize, ROLES, assertAssignedEvent } from '@/lib/auth';
+import { cacheGet, cacheSet, CacheKey, TTL } from '@/lib/cache';
 
 export async function GET(
   _req: Request,
@@ -13,6 +14,12 @@ export async function GET(
   if (!isAllowedCollection(colName)) return NextResponse.json({ error: 'Collection not allowed' }, { status: 404 });
   const assignedCheck = assertAssignedEvent(authCheck as Record<string, unknown>, colName);
   if (assignedCheck instanceof NextResponse) return assignedCheck;
+
+  // ── Cache check ────────────────────────────────────────────────────────────
+  const cacheKey = CacheKey.stats(db, colName);
+  const cached = await cacheGet<{ total: number; approved: number; rejected: number; checkedIn: number; pending: number }>(cacheKey);
+  if (cached !== null) return NextResponse.json(cached, { headers: { 'X-Cache': 'HIT' } });
+
   try {
     const client = await connectToMongo();
     const col = client.db(db).collection(colName);
@@ -47,7 +54,9 @@ export async function GET(
 
     const stats = agg[0] ?? { total: 0, approved: 0, rejected: 0, checkedIn: 0, pending: 0 };
     const { total, approved, rejected, checkedIn, pending } = stats as Record<string, number>;
-    return NextResponse.json({ total, approved, rejected, checkedIn, pending });
+    const result = { total, approved, rejected, checkedIn, pending };
+    await cacheSet(cacheKey, result, TTL.STATS);
+    return NextResponse.json(result, { headers: { 'X-Cache': 'MISS' } });
   } catch (e: unknown) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }

@@ -50,7 +50,12 @@ export default function ManageUsersPage() {
       headers,
       body: body ? JSON.stringify(body) : undefined,
     });
-    if (!r.ok) throw new Error((await r.json()).error || r.statusText);
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({ error: r.statusText }));
+      const err = new Error(j.error || r.statusText);
+      (err as any).status = r.status;
+      throw err;
+    }
     return r.json();
   };
 
@@ -60,6 +65,12 @@ export default function ManageUsersPage() {
       const list = await api("GET", "/admin/users");
       setUsers(list || []);
     } catch (e: unknown) {
+      const err = e as any;
+      // 401 / 403 means not authenticated as admin — redirect to login
+      if (err?.status === 401 || err?.status === 403 || (e as Error).message?.toLowerCase().includes('unauthorized') || (e as Error).message?.toLowerCase().includes('forbidden')) {
+        router.replace('/login');
+        return;
+      }
       alert((e as Error).message);
     } finally {
       setLoading(false);

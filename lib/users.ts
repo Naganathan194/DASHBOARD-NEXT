@@ -1,11 +1,11 @@
 import { connectToMongo } from './mongodb';
 import bcrypt from 'bcryptjs';
-import { promisify } from 'util';
+import { cacheGet, cacheSet, CacheKey, TTL } from './cache';
+import { ROLES } from './auth';
+import { ObjectId } from 'mongodb';
 
 const hashAsync = (s: string, rounds = 12) => new Promise<string>((res, rej) => bcrypt.hash(s, rounds, (err: Error | null, hash: string) => err ? rej(err) : res(hash)));
 const compareAsync = (s: string, hash: string) => new Promise<boolean>((res, rej) => bcrypt.compare(s, hash, (err: Error | null, ok: boolean) => err ? rej(err) : res(ok)));
-import { ROLES } from './auth';
-import { ObjectId } from 'mongodb';
 
 export type UserRecord = {
   _id?: unknown;
@@ -19,6 +19,21 @@ export type UserRecord = {
 
 const USERS_DB = process.env.USERS_DB || 'eventmanager_admin';
 const USERS_COLLECTION = process.env.USERS_COLLECTION || 'users';
+let usersIndexPromise: Promise<void> | null = null;
+
+async function ensureUsersIndexes() {
+  if (!usersIndexPromise) {
+    usersIndexPromise = (async () => {
+      const client = await connectToMongo();
+      const col = client.db(USERS_DB).collection<UserRecord>(USERS_COLLECTION);
+      await col.createIndex({ username: 1 }, { name: 'idx_users_username', unique: true, sparse: false });
+    })().catch((err) => {
+      usersIndexPromise = null;
+      throw err;
+    });
+  }
+  await usersIndexPromise;
+}
 
 function sanitizeUserOut(u: any) {
   const { passwordHash, ...rest } = u;
@@ -33,6 +48,7 @@ export async function createUser(username: string, password: string, role: strin
 
   const client = await connectToMongo();
   const col = client.db(USERS_DB).collection<UserRecord>(USERS_COLLECTION);
+  await ensureUsersIndexes();
   const existing = await col.findOne({ username });
   if (existing) throw new Error('Username already exists');
 
@@ -46,20 +62,39 @@ export async function createUser(username: string, password: string, role: strin
 export async function getAllUsers() {
   const client = await connectToMongo();
   const col = client.db(USERS_DB).collection<UserRecord>(USERS_COLLECTION);
+  await ensureUsersIndexes();
   const docs = await col.find({}).toArray();
   return docs.map(sanitizeUserOut);
 }
 
 export async function getUserByUsername(username: string) {
+  const rawUsername = String(username || '').trim();
+  const normalizedUsername = rawUsername.toLowerCase();
+  if (!rawUsername) return null;
+
+  // Use a sentinel value so we can tell apart "cache miss" from "user does not exist"
+  const cacheKey = CacheKey.userByUsername(normalizedUsername);
+  const cached = await cacheGet<{ found: false } | UserRecord>(cacheKey);
+  if (cached !== null) {
+    if ((cached as { found: false }).found === false) return null;
+    return cached as UserRecord;
+  }
+
   const client = await connectToMongo();
   const col = client.db(USERS_DB).collection<UserRecord>(USERS_COLLECTION);
-  const doc = await col.findOne({ username });
+  await ensureUsersIndexes();
+  const doc =
+    (await col.findOne({ username: rawUsername })) ||
+    (await col.findOne({ username: normalizedUsername }));
+  // Store a sentinel { found: false } so cache misses are distinguishable from cache skips
+  await cacheSet(cacheKey, doc ? doc : { found: false }, Math.min(120, TTL.USERS));
   return doc;
 }
 
 export async function updateUser(username: string, updates: Partial<{ password: string; role: string; newUsername: string; assignedEvent?: string | null }>) {
   const client = await connectToMongo();
   const col = client.db(USERS_DB).collection<UserRecord>(USERS_COLLECTION);
+  await ensureUsersIndexes();
   const patch: any = { updatedAt: new Date() };
   // find current user by username to use its _id for uniqueness checks
   const current = await col.findOne({ username });
@@ -83,14 +118,17 @@ export async function updateUser(username: string, updates: Partial<{ password: 
     patch.username = updates.newUsername;
   }
 
+  // MongoDB driver v6 returns the document directly (not wrapped in { value: doc })
   const res = await col.findOneAndUpdate({ username }, { $set: patch }, { returnDocument: 'after' as any });
-  if (!res || !('value' in res) || !res.value) throw new Error('User not found');
-  return sanitizeUserOut(res.value);
+  const updated = (res as any)?.value ?? res;
+  if (!updated) throw new Error('User not found');
+  return sanitizeUserOut(updated);
 }
 
 export async function updateUserById(id: string, updates: Partial<{ password: string; role: string; newUsername: string; assignedEvent?: string | null }>) {
   const client = await connectToMongo();
   const col = client.db(USERS_DB).collection<UserRecord>(USERS_COLLECTION);
+  await ensureUsersIndexes();
   const patch: any = { updatedAt: new Date() };
   let oid: any = id;
   try { oid = new ObjectId(id); } catch { /* keep as-is for non ObjectId ids */ }
@@ -155,6 +193,7 @@ export async function updateUserById(id: string, updates: Partial<{ password: st
 export async function deleteUser(username: string) {
   const client = await connectToMongo();
   const col = client.db(USERS_DB).collection<UserRecord>(USERS_COLLECTION);
+  await ensureUsersIndexes();
   await col.deleteOne({ username });
   return { success: true };
 }

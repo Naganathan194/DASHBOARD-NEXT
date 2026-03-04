@@ -3,6 +3,7 @@ import { connectToMongo } from "@/lib/mongodb";
 import { isAllowedCollection } from "@/lib/registrationCollections";
 import { authorize, ROLES, assertAssignedEvent } from "@/lib/auth";
 import { formatDateTime } from "@/lib/dateFormat";
+import { cacheGet, cacheSet, invalidateCollection, CacheKey, TTL } from "@/lib/cache";
 
 export async function GET(
   _req: Request,
@@ -21,14 +22,60 @@ export async function GET(
     col,
   );
   if (assignedCheck instanceof NextResponse) return assignedCheck;
+
+  // ── Cache check ────────────────────────────────────────────────────────────
+  const cacheKey = CacheKey.docs(db, col);
+  const cached = await cacheGet<unknown[]>(cacheKey);
+  if (cached !== null) {
+    console.info(`[CACHE] HIT docs db=${db} col=${col}`);
+    return NextResponse.json(cached, { headers: { 'X-Cache': 'HIT' } });
+  }
+
   try {
     const client = await connectToMongo();
+    const listProjection = {
+      _id: 1,
+      status: 1,
+      checkedIn: 1,
+      checkInTime: 1,
+      rejectionReason: 1,
+      createdAt: 1,
+      registeredAt: 1,
+      registrationId: 1,
+      regId: 1,
+      registerNumber: 1,
+      firstName: 1,
+      lastName: 1,
+      fname: 1,
+      lname: 1,
+      fullName: 1,
+      name: 1,
+      candidateName: 1,
+      studentName: 1,
+      email: 1,
+      mail: 1,
+      Email: 1,
+      transactionId: 1,
+      transaction_id: 1,
+      utr: 1,
+      upiTransactionId: 1,
+      paymentId: 1,
+      payment_id: 1,
+      txnId: 1,
+      txn_id: 1,
+      referenceId: 1,
+    } as const;
     const docs = await client
       .db(db)
       .collection(col)
-      .find({})
+      .find({}, { projection: listProjection })
       .toArray();
-    return NextResponse.json(docs);
+
+    // Serialize MongoDB ObjectId fields to strings before caching
+    const serialised = JSON.parse(JSON.stringify(docs));
+    await cacheSet(cacheKey, serialised, TTL.DOCS);
+    console.info(`[CACHE] MISS docs db=${db} col=${col} count=${serialised.length}`);
+    return NextResponse.json(serialised, { headers: { 'X-Cache': 'MISS' } });
   } catch (e: unknown) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }
@@ -65,6 +112,9 @@ export async function POST(
         createdAt: now, // raw Date kept for internal sorting / queries
         status: "pending",
       });
+
+    // Invalidate docs list + stats after insert
+    await invalidateCollection(db, col);
     return NextResponse.json({ success: true, id: result.insertedId });
   } catch (e: unknown) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });

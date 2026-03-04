@@ -111,6 +111,48 @@ const isImageKey = (k: string): boolean =>
 const getDocStatus = (doc: Doc): string =>
   doc.checkedIn ? "checked_in" : String(doc.status ?? "pending");
 
+// ─── Excel Export Column Configuration ────────────────────────────────────────
+// Fixed column order for Excel export with proper field mapping
+const EXCEL_EXPORT_COLUMNS = [
+  { header: "Event Name", field: "__eventName" },
+  { header: "Id", field: "_id" },
+  { header: "First Name", field: "firstName" },
+  { header: "Last Name", field: "lastName" },
+  { header: "Email", field: "email" },
+  { header: "Contact Number", field: "contactNumber" },
+  { header: "Gender", field: "gender" },
+  { header: "Payment Mode", field: "paymentMode" },
+  { header: "Transaction Id", field: "transactionId" },
+  { header: "College Name", field: "collegeName" },
+  { header: "Department", field: "department" },
+  { header: "Year Of Study", field: "yearOfStudy" },
+  { header: "College Register Number", field: "collegeRegisterNumber" },
+  { header: "City", field: "city" },
+  { header: "Workshop Name", field: "workshopName" },
+  { header: "Registration Date", field: "registrationDate" },
+  { header: "Approved At", field: "approvedAt" },
+  { header: "Check In Time", field: "checkInTime" },
+  { header: "Checked In", field: "checkedIn" },
+  { header: "Qr Code", field: "qrCode" },
+  { header: "Qr Token", field: "qrToken" },
+  { header: "Status", field: "status" },
+  { header: "Updated At", field: "updatedAt" },
+  { header: "Registered At", field: "registeredAt" },
+  { header: "Created At", field: "createdAt" },
+] as const;
+
+// Helper to extract and format field value for Excel export
+const getExcelValue = (doc: Doc, field: string): string => {
+  const v = (doc as any)[field];
+  if (v == null) return "";
+  if (DATE_FIELD_KEYS.has(field) || isIsoDateString(v)) {
+    return formatDateTime(v as string | number | Date | null);
+  }
+  if (typeof v === "boolean") return v ? "Yes" : "No";
+  if (typeof v === "object") return JSON.stringify(v);
+  return String(v);
+};
+
 // ─── API helper ────────────────────────────────────────────────────────────────
 async function api<T = unknown>(
   method: string,
@@ -141,6 +183,39 @@ async function api<T = unknown>(
     throw err;
   }
   return r.json() as T;
+}
+
+// Returns data + fromCache flag based on X-Cache response header
+async function apiWithMeta<T = unknown>(
+  method: string,
+  url: string,
+  body?: unknown,
+): Promise<{ data: T; fromCache: boolean }> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  try {
+    if (typeof window !== "undefined") {
+      const token = window.localStorage.getItem("authToken");
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const basic = window.localStorage.getItem("basicAuth");
+      if (basic && !headers["Authorization"])
+        headers["Authorization"] = `Basic ${basic}`;
+    }
+  } catch {
+    /* ignore */
+  }
+  const opts: RequestInit = { method, headers };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch("/api" + url, opts);
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({ error: r.statusText }));
+    const err = new Error(e.error || r.statusText);
+    (err as any).status = r.status;
+    throw err;
+  }
+  const fromCache = r.headers.get("x-cache") === "HIT";
+  return { data: (await r.json()) as T, fromCache };
 }
 
 // Centered warning modal used for scanner forbidden scans
@@ -289,6 +364,33 @@ function StatsGrid({ stats }: { stats: Stats }) {
   );
 }
 
+// ── CachePill ────────────────────────────────────────────────────────────────
+function CachePill({ source }: { source: "redis" | "db" | "mixed" | null }) {
+  if (!source) return null;
+  const cfg = {
+    redis: { icon: "⚡", label: "Redis", color: "#22c55e" },
+    db:    { icon: "🗄️", label: "DB",    color: "#64748b" },
+    mixed: { icon: "⚡", label: "Partial", color: "#f59e0b" },
+  }[source];
+  return (
+    <span
+      style={{
+        fontSize: 10,
+        padding: "2px 8px",
+        borderRadius: 20,
+        background: cfg.color + "22",
+        border: `1px solid ${cfg.color}55`,
+        color: cfg.color,
+        fontWeight: 700,
+        whiteSpace: "nowrap",
+        letterSpacing: 0.3,
+      }}
+    >
+      {cfg.icon} {cfg.label}
+    </span>
+  );
+}
+
 // ── DocDetail ─────────────────────────────────────────────────────────────────
 function DocDetail({
   doc,
@@ -299,6 +401,7 @@ function DocDetail({
   onResend,
   isAdmin,
   stats,
+  cacheSource,
 }: {
   doc: Doc;
   onApprove: (id: string) => void;
@@ -308,6 +411,7 @@ function DocDetail({
   onResend?: (id: string) => void;
   isAdmin?: boolean;
   stats?: Stats;
+  cacheSource?: "redis" | "db" | "mixed" | null;
 }) {
   const [imgSrc, setImgSrc] = useState("");
   const name = getDocName(doc);
@@ -360,6 +464,11 @@ function DocDetail({
             <div style={{ marginTop: 4 }}>
               <StatusPill status={status} />
             </div>
+            {cacheSource && (
+              <div style={{ marginTop: 6 }}>
+                <CachePill source={cacheSource} />
+              </div>
+            )}
             {isRejected && doc.rejectionReason != null && (
               <div style={{ marginTop: 8, fontSize: 13, color: "var(--red)" }}>
                 <i className="fas fa-info-circle" /> Reason:{" "}
@@ -1013,6 +1122,8 @@ export default function Dashboard() {
   const isScanner = userRole === "SCANNER";
   const isRegistrar = userRole === "REGISTRAR";
   const [searchQ, setSearchQ] = useState("");
+  const [docsSource, setDocsSource] = useState<"redis" | "db" | "mixed" | null>(null);
+  const [detailSource, setDetailSource] = useState<"redis" | "db" | null>(null);
   const [filterStatus, setFilterStatus] = useState("");
   // ── PDF transaction-ID filter ──────────────────────────────────────────────
   const [pdfTxIds, setPdfTxIds] = useState<Set<string> | null>(null);
@@ -1387,6 +1498,8 @@ export default function Dashboard() {
   const onColChange = async (col: string, dbParam?: string): Promise<Doc[]> => {
     const dbToUse = dbParam ?? state.db;
     stopAutoRefresh();
+    setDocsSource(null);
+    setDetailSource(null);
     setState((prev) => ({
       ...prev,
       col,
@@ -1427,9 +1540,9 @@ export default function Dashboard() {
     if (isScanner) return [];
     showLoading("Fetching records...");
     try {
-      const docs = (
-        await api<Doc[]>("GET", `/databases/${db}/collections/${col}/documents`)
-      ).map(serialise);
+      const { data: rawDocs, fromCache } = await apiWithMeta<Doc[]>("GET", `/databases/${db}/collections/${col}/documents`);
+      const docs = rawDocs.map(serialise);
+      setDocsSource(fromCache ? "redis" : "db");
       const sorted = docs.sort((a, b) => {
         const ra = String(
           a.registrationId ?? a.regId ?? a.registerNumber ?? "",
@@ -1476,24 +1589,31 @@ export default function Dashboard() {
     showLoading("Fetching all event records...");
     const allDocs: Doc[] = [];
     try {
-      for (const col of ALLOWED_COLLECTIONS) {
-        try {
-          const docs = (
-            await api<Doc[]>(
-              "GET",
-              `/databases/${state.db}/collections/${col}/documents`,
-            )
-          ).map(serialise);
-          const eventName = getEventDisplayName(col) || col;
-          docs.forEach((d) => {
-            (d as any).__eventName = eventName;
-            (d as any).__col = col; // track source collection for per-doc actions
-            allDocs.push(d);
-          });
-        } catch {
-          // skip unavailable collections silently
-        }
+      const results = await Promise.allSettled(
+        ALLOWED_COLLECTIONS.map(async (col) => {
+          const { data: rawDocs, fromCache } = await apiWithMeta<Doc[]>(
+            "GET",
+            `/databases/${state.db}/collections/${col}/documents`,
+          );
+          return { col, docs: rawDocs.map(serialise), fromCache };
+        }),
+      );
+
+      let cacheHits = 0;
+      let cacheMisses = 0;
+      for (const result of results) {
+        if (result.status !== "fulfilled") continue;
+        const { col, docs, fromCache } = result.value;
+        if (fromCache) cacheHits++;
+        else cacheMisses++;
+        const eventName = getEventDisplayName(col) || col;
+        docs.forEach((d) => {
+          (d as any).__eventName = eventName;
+          (d as any).__col = col; // track source collection for per-doc actions
+          allDocs.push(d);
+        });
       }
+      setDocsSource(cacheHits > 0 && cacheMisses === 0 ? "redis" : cacheHits === 0 ? "db" : "mixed");
       const sorted = allDocs.sort((a, b) => {
         const ra = String(
           a.registrationId ?? a.regId ?? a.registerNumber ?? "",
@@ -1693,12 +1813,12 @@ export default function Dashboard() {
       if (isScanner) {
         setState((prev) => ({ ...prev, details: null }));
       } else {
-        const doc = serialise(
-          await api<Doc>(
-            "GET",
-            `/databases/${dbToUse}/collections/${colToUse}/documents/${id}`,
-          ),
+        const { data: rawDoc, fromCache } = await apiWithMeta<Doc>(
+          "GET",
+          `/databases/${dbToUse}/collections/${colToUse}/documents/${id}`,
         );
+        const doc = serialise(rawDoc);
+        setDetailSource(fromCache ? "redis" : "db");
         // Preserve __eventName and __col metadata from the list entry (for all-events mode)
         const listEntry = state.docs.find((d) => String(d._id) === id);
         if (listEntry) {
@@ -1941,31 +2061,18 @@ export default function Dashboard() {
     const XLSX = await import("xlsx");
     // "__all__" mode: we already have all docs in state – export them directly
     if (state.col === "__all__") {
-      const docs = state.filtered.length ? state.filtered : state.docs;
+      // Always export `filtered` — when no filter is active, filtered === docs;
+      // using docs as fallback would silently export everything when the filter returns 0 results
+      const docs = state.filtered;
       if (!docs.length) {
         toast("No records to export", "info");
         return;
       }
-      const keysSet = new Set<string>();
-      docs.forEach((d) =>
-        Object.keys(d).forEach((k) => {
-          if (!isImageKey(k) && k !== "__col") keysSet.add(k);
-        }),
-      );
-      keysSet.delete("__eventName");
-      const keys = ["__eventName", ...Array.from(keysSet)];
-      const headerRow = keys.map(getColHeader);
+      const headerRow = EXCEL_EXPORT_COLUMNS.map((col) => col.header);
       const rows = [
         headerRow,
         ...docs.map((d) =>
-          keys.map((k) => {
-            const v = (d as any)[k];
-            if (v == null) return "";
-            if (DATE_FIELD_KEYS.has(k) || isIsoDateString(v))
-              return formatDateTime(v as string | number | Date | null);
-            if (typeof v === "object") return JSON.stringify(v);
-            return String(v);
-          }),
+          EXCEL_EXPORT_COLUMNS.map((col) => getExcelValue(d, col.field)),
         ),
       ];
       const wb = XLSX.utils.book_new();
@@ -1981,32 +2088,23 @@ export default function Dashboard() {
       toast("Exported successfully", "success");
       return;
     }
-    // If a specific collection is selected, keep existing behavior
+    // If a specific collection is selected, use fixed column structure
     if (state.col) {
       const docs = state.docs;
       if (!docs.length) {
         toast("No records to export", "info");
         return;
       }
-      // Union keys from ALL docs so fields absent in doc[0] are not missed
-      const keysSet = new Set<string>();
-      docs.forEach((d) =>
-        Object.keys(d).forEach((k) => {
-          if (!isImageKey(k)) keysSet.add(k);
-        }),
-      );
-      const keys = Array.from(keysSet);
+      // Add event name to each doc for consistent export
+      const docsWithEvent = docs.map((d) => ({
+        ...d,
+        __eventName: getEventDisplayName(state.col) || state.col,
+      }));
+      const headerRow = EXCEL_EXPORT_COLUMNS.map((col) => col.header);
       const rows = [
-        keys.map(getColHeader),
-        ...docs.map((d) =>
-          keys.map((k) => {
-            const v = d[k];
-            if (v == null) return "";
-            if (DATE_FIELD_KEYS.has(k) || isIsoDateString(v))
-              return formatDateTime(v as string | number | Date | null);
-            if (typeof v === "object") return JSON.stringify(v);
-            return String(v);
-          }),
+        headerRow,
+        ...docsWithEvent.map((d) =>
+          EXCEL_EXPORT_COLUMNS.map((col) => getExcelValue(d, col.field)),
         ),
       ];
 
@@ -2051,29 +2149,13 @@ export default function Dashboard() {
         return;
       }
 
-      // build a consistent header set across all docs
-      const keysSet = new Set<string>();
-      allDocs.forEach((d) =>
-        Object.keys(d).forEach((k) => {
-          if (!isImageKey(k)) keysSet.add(k);
-        }),
-      );
-      // ensure our synthetic event name column is first and has a friendly header
-      keysSet.delete("__eventName");
-      const keys = ["__eventName", ...Array.from(keysSet)];
-      const headerRow = keys.map(getColHeader);
+      // Use fixed column structure for consistent export
+      const headerRow = EXCEL_EXPORT_COLUMNS.map((col) => col.header);
 
       const rows = [
         headerRow,
         ...allDocs.map((d) =>
-          keys.map((k) => {
-            const v = (d as any)[k];
-            if (v == null) return "";
-            if (DATE_FIELD_KEYS.has(k) || isIsoDateString(v))
-              return formatDateTime(v as string | number | Date | null);
-            if (typeof v === "object") return JSON.stringify(v);
-            return String(v);
-          }),
+          EXCEL_EXPORT_COLUMNS.map((col) => getExcelValue(d, col.field)),
         ),
       ];
 
@@ -2104,13 +2186,17 @@ export default function Dashboard() {
     }
     autoRefreshRef.current = setInterval(async () => {
       if (!db || !col) return;
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
       try {
-        const docs = (
-          await api<Doc[]>(
+        const [docsRes, statsRes] = await Promise.all([
+          apiWithMeta<Doc[]>(
             "GET",
             `/databases/${db}/collections/${col}/documents`,
-          )
-        ).map(serialise);
+          ),
+          api<Stats>("GET", `/databases/${db}/collections/${col}/stats`).catch(() => null),
+        ]);
+        const docs = docsRes.data.map(serialise);
+        setDocsSource(docsRes.fromCache ? "redis" : "db");
         setState((prev) => {
           if (
             JSON.stringify(docs.map((d) => d._id)) !==
@@ -2124,11 +2210,7 @@ export default function Dashboard() {
           }
           return prev;
         });
-        const s = await api<Stats>(
-          "GET",
-          `/databases/${db}/collections/${col}/stats`,
-        ).catch(() => null);
-        if (s) setStats(s);
+        if (statsRes) setStats(statsRes);
       } catch {
         /* silent */
       }
@@ -2316,6 +2398,7 @@ export default function Dashboard() {
                       }
                     }}
                     isAdmin={isAdmin}
+                    cacheSource={detailSource}
                   />
                 </li>
               )}
@@ -2583,6 +2666,7 @@ export default function Dashboard() {
                     : "All Records"}
               </span>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <CachePill source={docsSource} />
                 <span className="badge">{state.filtered.length}</span>
                 {isAdmin && state.col && (
                   <>
@@ -2925,6 +3009,7 @@ export default function Dashboard() {
                     }
                   }}
                   isAdmin={isAdmin}
+                  cacheSource={detailSource}
                 />
               ) : !state.col ? (
                 <div className="placeholder">

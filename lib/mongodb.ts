@@ -1,19 +1,22 @@
 import { MongoClient, MongoClientOptions } from 'mongodb';
 
 const MONGODB_URI = process.env.MONGODB_URI;
+const MONGODB_MAX_POOL_SIZE = Number(process.env.MONGODB_MAX_POOL_SIZE || 15);
+const MONGODB_MIN_POOL_SIZE = Number(process.env.MONGODB_MIN_POOL_SIZE || 0);
 
 if (!MONGODB_URI) {
   throw new Error('Please define the MONGODB_URI environment variable in .env.local');
 }
 
 const options: MongoClientOptions = {
-  // Keep the pool small for serverless (Vercel spins up many function instances).
-  // M0 free tier allows ~500 total connections; each Vercel function instance will
-  // hold at most maxPoolSize connections, so keep this low.
-  maxPoolSize: 5,
+  // Allow a bit more concurrency for parallel logins and dashboard requests.
+  // Keep this configurable so deployments can tune based on cluster limits.
+  maxPoolSize: Number.isFinite(MONGODB_MAX_POOL_SIZE) ? Math.max(5, MONGODB_MAX_POOL_SIZE) : 15,
 
   // Release idle connections quickly so they don't pile up across warm instances.
-  minPoolSize: 0,
+  minPoolSize: Number.isFinite(MONGODB_MIN_POOL_SIZE) ? Math.max(0, MONGODB_MIN_POOL_SIZE) : 0,
+  maxConnecting: 5,
+  waitQueueTimeoutMS: 15_000,
   maxIdleTimeMS: 10_000,
 
   // Give enough time for Atlas M0 cold-start (free tier can be slow).

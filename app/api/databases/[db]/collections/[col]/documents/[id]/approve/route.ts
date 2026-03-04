@@ -7,6 +7,7 @@ import { ObjectId, Filter, Document } from 'mongodb';
 import QRCode from 'qrcode';
 import crypto from 'crypto';
 import { authorize, ROLES } from '@/lib/auth';
+import { invalidateDoc } from '@/lib/cache';
 
 const WHATSAPP_COMMUNITY_LINK = process.env.WHATSAPP_COMMUNITY_LINK;
 const WHATSAPP_COMMUNITY_LINK_PORTPASS = process.env.WHATSAPP_COMMUNITY_LINK_PORTPASS;
@@ -63,6 +64,11 @@ export async function POST(
     const doc = await client.db(params_.db).collection(params_.col).findOne(query);
     if (!doc) return NextResponse.json({ error: 'Document not found' }, { status: 404 });
 
+    // Idempotency: if already approved, return the existing QR code without re-generating
+    if (doc.status === 'approved' && doc.qrCode) {
+      return NextResponse.json({ success: true, qrCode: String(doc.qrCode) });
+    }
+
     const qrToken = crypto.randomBytes(16).toString('hex');
     const qrPayload = JSON.stringify({
       id: params_.id,
@@ -93,6 +99,9 @@ export async function POST(
         checkInTime: null,
       },
     });
+
+    // Invalidate doc, docs list, and stats caches
+    await invalidateDoc(params_.db, params_.col, params_.id);
 
     const email = pick(doc as Record<string, unknown>, 'email', 'mail', 'Email');
 

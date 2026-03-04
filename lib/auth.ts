@@ -34,7 +34,10 @@ export function verifyToken(token: string) {
     if (!b64payload || !b64sig) return null;
     const payloadJson = Buffer.from(b64payload, 'base64').toString('utf8');
     const expectedSig = base64Url(hmac(payloadJson));
-    if (expectedSig !== b64sig) return null;
+    // Use timingSafeEqual to prevent timing-based signature brute-force
+    const a = Buffer.from(expectedSig);
+    const b = Buffer.from(b64sig);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
     const payload = JSON.parse(payloadJson) as any;
     if (payload.exp && Date.now() > payload.exp) return null;
     return payload as Record<string, unknown>;
@@ -52,7 +55,11 @@ export async function getAuthFromRequest(req: Request) {
       const b = auth.slice(6);
       const decoded = Buffer.from(b, 'base64').toString('utf8');
       const [user, pass] = decoded.split(':');
-      if (user && pass && process.env.ADMIN_USER && process.env.ADMIN_PASS && user === process.env.ADMIN_USER && pass === process.env.ADMIN_PASS) {
+      const adminUser = process.env.ADMIN_USER || '';
+      const adminPass = process.env.ADMIN_PASS || '';
+      const userMatches = adminUser.length > 0 && user && user.length === adminUser.length && crypto.timingSafeEqual(Buffer.from(user), Buffer.from(adminUser));
+      const passMatches = adminPass.length > 0 && pass && pass.length === adminPass.length && crypto.timingSafeEqual(Buffer.from(pass), Buffer.from(adminPass));
+      if (userMatches && passMatches) {
         return { role: ROLES.ADMIN, user } as Record<string, unknown>;
       }
       return null;
