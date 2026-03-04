@@ -1,14 +1,25 @@
 import { NextResponse } from 'next/server';
 import { signToken } from '@/lib/auth';
 import { validateUserCredentials } from '@/lib/users';
+import { timingSafeEqual } from 'crypto';
+
+function safeEqual(a: string, b: string): boolean {
+  try {
+    const ba = Buffer.from(a);
+    const bb = Buffer.from(b);
+    return ba.length === bb.length && timingSafeEqual(ba, bb);
+  } catch {
+    return false;
+  }
+}
 
 export async function POST(req: Request) {
   try {
     const { username, password } = await req.json();
     if (!username || !password) return NextResponse.json({ error: 'username and password required' }, { status: 400 });
 
-    // Admin via env
-    if (process.env.ADMIN_USER && process.env.ADMIN_PASS && username === process.env.ADMIN_USER && password === process.env.ADMIN_PASS) {
+    // Admin via env — use timing-safe comparisons to prevent enumeration
+    if (process.env.ADMIN_USER && process.env.ADMIN_PASS && safeEqual(username, process.env.ADMIN_USER) && safeEqual(password, process.env.ADMIN_PASS)) {
       const payload = { username: process.env.ADMIN_USER, role: 'ADMIN' };
       const token = signToken(payload, 60 * 60 * 24); // 1 day
       return NextResponse.json({ token, user: payload });

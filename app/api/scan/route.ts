@@ -4,6 +4,7 @@ import { isAllowedCollection } from '@/lib/registrationCollections';
 import { ObjectId, Filter, Document } from 'mongodb';
 import { authorize, ROLES, assertAssignedEvent } from '@/lib/auth';
 import { getDisplayName } from '@/lib/registrationCollections';
+import { timingSafeEqual } from 'crypto';
 
 function buildQuery(id: string): Filter<Document> {
   try { return { _id: new ObjectId(id) }; } catch { return { _id: id } as unknown as Filter<Document>; }
@@ -25,7 +26,13 @@ export async function POST(req: Request) {
     const client = await connectToMongo();
     const doc = await client.db(db).collection(collection).findOne(buildQuery(id));
     if (!doc) return NextResponse.json({ error: 'Attendee not found' }, { status: 404 });
-    if (doc.qrToken !== token) return NextResponse.json({ error: 'Invalid QR code' }, { status: 400 });
+    // Use timing-safe comparison to prevent token timing attacks
+    const storedToken = String(doc.qrToken ?? '');
+    const providedToken = String(token ?? '');
+    const tokensMatch = storedToken.length > 0 &&
+      storedToken.length === providedToken.length &&
+      timingSafeEqual(Buffer.from(storedToken), Buffer.from(providedToken));
+    if (!tokensMatch) return NextResponse.json({ error: 'Invalid QR code' }, { status: 400 });
 
     // Human-readable event name for client display
     const eventName = getDisplayName(collection);

@@ -16,6 +16,7 @@ export const DATE_FIELD_KEYS = new Set([
   "approvedAt",
   "rejectedAt",
   "checkInTime",
+  "registrationDate",
 ]);
 
 /** Check if a value is an ISO 8601 date string (e.g. 2026-02-22T11:48:16.575Z) */

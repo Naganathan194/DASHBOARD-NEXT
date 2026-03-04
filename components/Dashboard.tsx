@@ -1,10 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { getEventDisplayName } from "@/lib/events";
-import { ALLOWED_COLLECTIONS } from "@/lib/registrationCollections";
+import { ALLOWED_COLLECTIONS, DISPLAY_NAME_MAP } from "@/lib/registrationCollections";
+
+// Maps event display names → DB collection names (used by the Add form)
+const EVENT_DISPLAY_TO_COLLECTION: Record<string, string> = Object.fromEntries(
+  Object.entries(DISPLAY_NAME_MAP).map(([col, display]) => [display, col]),
+);
+const EVENT_OPTIONS = Object.values(DISPLAY_NAME_MAP);
 import {
   formatDateTime,
   DATE_FIELD_KEYS,
@@ -49,9 +55,26 @@ const formatKey = (k: string) =>
     .trim()
     .replace(/\b\w/g, (l) => l.toUpperCase());
 
+// Known field-key variants that represent payment mode – always exported as "Payment Mode"
+const PAYMENT_MODE_KEYS = new Set([
+  "paymentMode",
+  "payment_mode",
+  "modeOfPayment",
+  "mode_of_payment",
+  "payMode",
+  "pay_mode",
+  "transactionMode",
+  "transaction_mode",
+]);
+
+// Returns the human-readable column header for a given document key
+const getColHeader = (k: string): string => {
+  if (k === "__eventName") return "Event Name";
+  if (PAYMENT_MODE_KEYS.has(k)) return "Payment Mode";
+  return formatKey(k);
+};
+
 const formatColName = (n: string) => getEventDisplayName(n);
-
-
 
 const getDocName = (doc: Doc): string => {
   for (const k of [
@@ -81,12 +104,80 @@ const isImageVal = (v: unknown): boolean => {
 };
 
 const isImageKey = (k: string): boolean =>
-  /screenshot|image|photo|picture|img|payment|receipt|signature|avatar|profile/i.test(
+  /(screenshot|receipt|receipt_image|payment_screenshot|payment_receipt|image|photo|picture|img|signature|avatar|profile)/i.test(
     k,
   );
 
 const getDocStatus = (doc: Doc): string =>
   doc.checkedIn ? "checked_in" : String(doc.status ?? "pending");
+
+// ─── Excel Export Column Configuration ────────────────────────────────────────
+// Fixed column order for Excel export with proper field mapping
+const EXCEL_EXPORT_COLUMNS = [
+  { header: "Event Name", field: "__eventName" },
+  { header: "Id", field: "_id" },
+  { header: "First Name", field: "firstName" },
+  { header: "Last Name", field: "lastName" },
+  { header: "Email", field: "email" },
+  { header: "Contact Number", field: "contactNumber" },
+  { header: "Gender", field: "gender" },
+  { header: "Payment Mode", field: "paymentMode" },
+  { header: "Transaction Id", field: "transactionId" },
+  { header: "College Name", field: "collegeName" },
+  { header: "Department", field: "department" },
+  { header: "Year Of Study", field: "yearOfStudy" },
+  { header: "College Register Number", field: "collegeRegisterNumber" },
+  { header: "City", field: "city" },
+  { header: "Workshop Name", field: "workshopName" },
+  { header: "Registration Date", field: "registrationDate" },
+  { header: "Approved At", field: "approvedAt" },
+  { header: "Check In Time", field: "checkInTime" },
+  { header: "Checked In", field: "checkedIn" },
+  { header: "Qr Code", field: "qrCode" },
+  { header: "Qr Token", field: "qrToken" },
+  { header: "Status", field: "status" },
+  { header: "Updated At", field: "updatedAt" },
+  { header: "Registered At", field: "registeredAt" },
+  { header: "Created At", field: "createdAt" },
+] as const;
+
+// Helper to pick first truthy value from field name variations
+const pickField = (doc: Doc, ...keys: string[]): any => {
+  for (const k of keys) {
+    const v = (doc as any)[k];
+    if (v != null && v !== "") return v;
+  }
+  return null;
+};
+
+// Field name variations mapping for flexible data extraction
+const FIELD_VARIATIONS: Record<string, string[]> = {
+  contactNumber: ["contactNumber", "phone", "mobile", "phoneNumber", "contact", "mobileNumber"],
+  gender: ["gender", "Gender"],
+  paymentMode: ["paymentMode", "payment_mode", "modeOfPayment"],
+  collegeName: ["collegeName", "college", "institution", "institutionName", "College"],
+  department: ["department", "dept", "branch", "stream", "Department"],
+  yearOfStudy: ["yearOfStudy", "year", "currentYear", "Year"],
+  collegeRegisterNumber: ["collegeRegisterNumber", "registerNumber", "regNo", "registrationNumber", "rollNumber", "rollNo", "regno", "registerNo"],
+  city: ["city", "City", "location", "place"],
+  workshopName: ["workshopName", "workshop", "eventName"],
+  registrationDate: ["registrationDate", "registration_date"],
+};
+
+// Helper to extract and format field value for Excel export
+const getExcelValue = (doc: Doc, field: string): string => {
+  // Try field variations if defined
+  const variations = FIELD_VARIATIONS[field];
+  const v = variations ? pickField(doc, ...variations) : (doc as any)[field];
+  
+  if (v == null) return "";
+  if (DATE_FIELD_KEYS.has(field) || isIsoDateString(v)) {
+    return formatDateTime(v as string | number | Date | null);
+  }
+  if (typeof v === "boolean") return v ? "Yes" : "No";
+  if (typeof v === "object") return JSON.stringify(v);
+  return String(v);
+};
 
 // ─── API helper ────────────────────────────────────────────────────────────────
 async function api<T = unknown>(
@@ -118,6 +209,39 @@ async function api<T = unknown>(
     throw err;
   }
   return r.json() as T;
+}
+
+// Returns data + fromCache flag based on X-Cache response header
+async function apiWithMeta<T = unknown>(
+  method: string,
+  url: string,
+  body?: unknown,
+): Promise<{ data: T; fromCache: boolean }> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  try {
+    if (typeof window !== "undefined") {
+      const token = window.localStorage.getItem("authToken");
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const basic = window.localStorage.getItem("basicAuth");
+      if (basic && !headers["Authorization"])
+        headers["Authorization"] = `Basic ${basic}`;
+    }
+  } catch {
+    /* ignore */
+  }
+  const opts: RequestInit = { method, headers };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch("/api" + url, opts);
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({ error: r.statusText }));
+    const err = new Error(e.error || r.statusText);
+    (err as any).status = r.status;
+    throw err;
+  }
+  const fromCache = r.headers.get("x-cache") === "HIT";
+  return { data: (await r.json()) as T, fromCache };
 }
 
 // Centered warning modal used for scanner forbidden scans
@@ -266,6 +390,33 @@ function StatsGrid({ stats }: { stats: Stats }) {
   );
 }
 
+// ── CachePill ────────────────────────────────────────────────────────────────
+function CachePill({ source }: { source: "redis" | "db" | "mixed" | null }) {
+  if (!source) return null;
+  const cfg = {
+    redis: { icon: "⚡", label: "Redis", color: "#22c55e" },
+    db:    { icon: "🗄️", label: "DB",    color: "#64748b" },
+    mixed: { icon: "⚡", label: "Partial", color: "#f59e0b" },
+  }[source];
+  return (
+    <span
+      style={{
+        fontSize: 10,
+        padding: "2px 8px",
+        borderRadius: 20,
+        background: cfg.color + "22",
+        border: `1px solid ${cfg.color}55`,
+        color: cfg.color,
+        fontWeight: 700,
+        whiteSpace: "nowrap",
+        letterSpacing: 0.3,
+      }}
+    >
+      {cfg.icon} {cfg.label}
+    </span>
+  );
+}
+
 // ── DocDetail ─────────────────────────────────────────────────────────────────
 function DocDetail({
   doc,
@@ -276,6 +427,7 @@ function DocDetail({
   onResend,
   isAdmin,
   stats,
+  cacheSource,
 }: {
   doc: Doc;
   onApprove: (id: string) => void;
@@ -285,6 +437,7 @@ function DocDetail({
   onResend?: (id: string) => void;
   isAdmin?: boolean;
   stats?: Stats;
+  cacheSource?: "redis" | "db" | "mixed" | null;
 }) {
   const [imgSrc, setImgSrc] = useState("");
   const name = getDocName(doc);
@@ -307,17 +460,41 @@ function DocDetail({
       <div className="detail-card">
         <div className="detail-header">
           <div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 4,
+              }}
+            >
               <div className="detail-name">{name}</div>
               {stats && (
-                <div style={{ fontSize: 12, padding: "4px 12px", background: "var(--accent)", color: "white", borderRadius: 20 }}>
-                  <i className="fas fa-hourglass-half" style={{ marginRight: 6 }} /> {stats.pending} Pending
+                <div
+                  style={{
+                    fontSize: 12,
+                    padding: "4px 12px",
+                    background: "var(--accent)",
+                    color: "white",
+                    borderRadius: 20,
+                  }}
+                >
+                  <i
+                    className="fas fa-hourglass-half"
+                    style={{ marginRight: 6 }}
+                  />{" "}
+                  {stats.pending} Pending
                 </div>
               )}
             </div>
             <div style={{ marginTop: 4 }}>
               <StatusPill status={status} />
             </div>
+            {cacheSource && (
+              <div style={{ marginTop: 6 }}>
+                <CachePill source={cacheSource} />
+              </div>
+            )}
             {isRejected && doc.rejectionReason != null && (
               <div style={{ marginTop: 8, fontSize: 13, color: "var(--red)" }}>
                 <i className="fas fa-info-circle" /> Reason:{" "}
@@ -455,8 +632,9 @@ function DocDetail({
                   Attendee uses this to check in
                 </p>
                 {doc.checkInTime != null && (
-                  <div style={{ fontSize: 12, color: 'var(--blue)' }}>
-                    <i className="fas fa-clock" /> Checked in: {formatDateTime(String(doc.checkInTime))}
+                  <div style={{ fontSize: 12, color: "var(--blue)" }}>
+                    <i className="fas fa-clock" /> Checked in:{" "}
+                    {formatDateTime(String(doc.checkInTime))}
                   </div>
                 )}
                 <a
@@ -541,16 +719,13 @@ function ScannerPanel({
       if (scannerRef.current) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const inst = scannerRef.current as any;
-        await inst.stop().catch((err: unknown) => {
-          console.warn("scanner stop error", err);
-        });
+        await inst.stop().catch(() => {});
         try {
-          await inst.clear().catch(() => { });
-        } catch { }
+          await inst.clear().catch(() => {});
+        } catch {}
         scannerRef.current = null;
       }
-    } catch (err) {
-      console.warn("stopScanner error", err);
+    } catch {
       scannerRef.current = null;
     }
   }, []);
@@ -563,7 +738,7 @@ function ScannerPanel({
       if (scannerRef.current) {
         try {
           await (scannerRef.current as any).stop();
-        } catch { }
+        } catch {}
         scannerRef.current = null;
       }
 
@@ -583,8 +758,8 @@ function ScannerPanel({
             cameraIdOrConfig = back && back.id ? back.id : cams[0].id;
           }
         }
-      } catch (e) {
-        console.warn("getCameras failed, falling back to facingMode", e);
+      } catch {
+        // getCameras unavailable – facingMode fallback stays
       }
 
       const onDecode = async (decoded: string, result?: unknown) => {
@@ -592,8 +767,6 @@ function ScannerPanel({
         if (processingRef.current) return;
         processingRef.current = true;
         try {
-          console.log("qr decoded:", decoded);
-          // Process but keep camera running
           await processScan(decoded);
         } catch (e) {
           console.error("onDecode handler error", e);
@@ -605,23 +778,19 @@ function ScannerPanel({
         }
       };
 
-      const onError = (err: unknown) => {
-        // decode attempt failed for a frame - not fatal
-        // keep quiet in production but log for debugging
-        // console.debug('qr decode fail', err);
+      const onError = (_err: unknown) => {
+        // decode attempt failed for a frame – not fatal
       };
 
       const config = { fps: 10, qrbox: { width: 250, height: 250 } } as any;
-      // Start scanner
       await scanner.start(cameraIdOrConfig, config, onDecode, onError);
-      console.log("scanner started", cameraIdOrConfig, config);
     } catch (e: unknown) {
       console.error("startScanner error", e);
       onToast("Camera error: " + String(e), "error");
       setScanning(false);
       try {
         await stopScanner();
-      } catch { }
+      } catch {}
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stopScanner, onToast]);
@@ -676,8 +845,18 @@ function ScannerPanel({
 
       setScanResult(
         <div className={`scan-result success`}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-            <i className="fas fa-user-circle" style={{ fontSize: 36, color: 'var(--accent)' }} />
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              marginBottom: 12,
+            }}
+          >
+            <i
+              className="fas fa-user-circle"
+              style={{ fontSize: 36, color: "var(--accent)" }}
+            />
             <div>
               <div className="scan-attendee-name">{name}</div>
               {eventName ? (
@@ -693,13 +872,29 @@ function ScannerPanel({
             </div>
           </div>
           {/* Event / Workshop name */}
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.4)', borderRadius: 20, padding: '4px 12px', fontSize: 12, color: 'var(--accent)', fontWeight: 600, marginBottom: 12 }}>
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              background: "rgba(99,102,241,0.15)",
+              border: "1px solid rgba(99,102,241,0.4)",
+              borderRadius: 20,
+              padding: "4px 12px",
+              fontSize: 12,
+              color: "var(--accent)",
+              fontWeight: 600,
+              marginBottom: 12,
+            }}
+          >
             <i className="fas fa-calendar-star" />
             {getEventDisplayName(r.collection)}
           </div>
-          <div className={`checkin-status ${alreadyIn ? 'in' : 'out'}`}>
-            <i className={`fas fa-${alreadyIn ? 'check-circle' : 'clock'}`} />
-            {alreadyIn ? `Already Checked In at ${formatDateTime(String(doc.checkInTime))}` : 'Not Yet Checked In'}
+          <div className={`checkin-status ${alreadyIn ? "in" : "out"}`}>
+            <i className={`fas fa-${alreadyIn ? "check-circle" : "clock"}`} />
+            {alreadyIn
+              ? `Already Checked In at ${formatDateTime(String(doc.checkInTime))}`
+              : "Not Yet Checked In"}
           </div>
           <div
             style={{
@@ -942,7 +1137,10 @@ export default function Dashboard() {
   const isAdmin = userRole === "ADMIN";
   const isViewer = userRole === "ATTENDEE_VIEWER";
   const isScanner = userRole === "SCANNER";
+  const isRegistrar = userRole === "REGISTRAR";
   const [searchQ, setSearchQ] = useState("");
+  const [docsSource, setDocsSource] = useState<"redis" | "db" | "mixed" | null>(null);
+  const [detailSource, setDetailSource] = useState<"redis" | "db" | null>(null);
   const [filterStatus, setFilterStatus] = useState("");
   // ── PDF transaction-ID filter ──────────────────────────────────────────────
   const [pdfTxIds, setPdfTxIds] = useState<Set<string> | null>(null);
@@ -1005,13 +1203,13 @@ export default function Dashboard() {
         PERSIST_KEY,
         JSON.stringify({ ...p, _ts: Date.now() }),
       );
-    } catch { }
+    } catch {}
   };
   const clearPersist = () => {
     if (typeof window === "undefined") return;
     try {
       sessionStorage.removeItem(PERSIST_KEY);
-    } catch { }
+    } catch {}
   };
 
   const toast = useCallback(
@@ -1043,7 +1241,7 @@ export default function Dashboard() {
     }
     try {
       clearPersist();
-    } catch { }
+    } catch {}
     pushUrl(null, null);
     router.replace("/login");
   };
@@ -1135,6 +1333,11 @@ export default function Dashboard() {
           } catch {
             /* ignore */
           }
+        } else if (role === "REGISTRAR") {
+          // Pre-select assigned event for REGISTRAR so the Add modal can pre-fill
+          if (assigned && assigned !== "*") {
+            setState((s) => ({ ...s, col: assigned! }));
+          }
         }
         setConnected(true);
       } catch (e: unknown) {
@@ -1153,8 +1356,16 @@ export default function Dashboard() {
         const email = getDocEmail(d).toLowerCase();
         // Gather all known transaction-ID-like fields into one string for matching
         const txField = String(
-          d.transactionId ?? d.transaction_id ?? d.utr ?? d.upiTransactionId ??
-          d.paymentId ?? d.payment_id ?? d.txnId ?? d.txn_id ?? d.referenceId ?? ""
+          d.transactionId ??
+            d.transaction_id ??
+            d.utr ??
+            d.upiTransactionId ??
+            d.paymentId ??
+            d.payment_id ??
+            d.txnId ??
+            d.txn_id ??
+            d.referenceId ??
+            "",
         ).toLowerCase();
         const matchQ =
           !q ||
@@ -1263,7 +1474,7 @@ export default function Dashboard() {
     };
     try {
       writePersist(toSave);
-    } catch { }
+    } catch {}
   }, [state.col, filterStatus, state.selected]);
 
   // ── DB change ─────────────────────────────────────────────────────────────
@@ -1304,6 +1515,8 @@ export default function Dashboard() {
   const onColChange = async (col: string, dbParam?: string): Promise<Doc[]> => {
     const dbToUse = dbParam ?? state.db;
     stopAutoRefresh();
+    setDocsSource(null);
+    setDetailSource(null);
     setState((prev) => ({
       ...prev,
       col,
@@ -1344,9 +1557,9 @@ export default function Dashboard() {
     if (isScanner) return [];
     showLoading("Fetching records...");
     try {
-      const docs = (
-        await api<Doc[]>("GET", `/databases/${db}/collections/${col}/documents`)
-      ).map(serialise);
+      const { data: rawDocs, fromCache } = await apiWithMeta<Doc[]>("GET", `/databases/${db}/collections/${col}/documents`);
+      const docs = rawDocs.map(serialise);
+      setDocsSource(fromCache ? "redis" : "db");
       const sorted = docs.sort((a, b) => {
         const ra = String(
           a.registrationId ?? a.regId ?? a.registerNumber ?? "",
@@ -1393,27 +1606,38 @@ export default function Dashboard() {
     showLoading("Fetching all event records...");
     const allDocs: Doc[] = [];
     try {
-      for (const col of ALLOWED_COLLECTIONS) {
-        try {
-          const docs = (
-            await api<Doc[]>(
-              "GET",
-              `/databases/${state.db}/collections/${col}/documents`,
-            )
-          ).map(serialise);
-          const eventName = getEventDisplayName(col) || col;
-          docs.forEach((d) => {
-            (d as any).__eventName = eventName;
-            (d as any).__col = col; // track source collection for per-doc actions
-            allDocs.push(d);
-          });
-        } catch {
-          // skip unavailable collections silently
-        }
+      const results = await Promise.allSettled(
+        ALLOWED_COLLECTIONS.map(async (col) => {
+          const { data: rawDocs, fromCache } = await apiWithMeta<Doc[]>(
+            "GET",
+            `/databases/${state.db}/collections/${col}/documents`,
+          );
+          return { col, docs: rawDocs.map(serialise), fromCache };
+        }),
+      );
+
+      let cacheHits = 0;
+      let cacheMisses = 0;
+      for (const result of results) {
+        if (result.status !== "fulfilled") continue;
+        const { col, docs, fromCache } = result.value;
+        if (fromCache) cacheHits++;
+        else cacheMisses++;
+        const eventName = getEventDisplayName(col) || col;
+        docs.forEach((d) => {
+          (d as any).__eventName = eventName;
+          (d as any).__col = col; // track source collection for per-doc actions
+          allDocs.push(d);
+        });
       }
+      setDocsSource(cacheHits > 0 && cacheMisses === 0 ? "redis" : cacheHits === 0 ? "db" : "mixed");
       const sorted = allDocs.sort((a, b) => {
-        const ra = String(a.registrationId ?? a.regId ?? a.registerNumber ?? "");
-        const rb = String(b.registrationId ?? b.regId ?? b.registerNumber ?? "");
+        const ra = String(
+          a.registrationId ?? a.regId ?? a.registerNumber ?? "",
+        );
+        const rb = String(
+          b.registrationId ?? b.regId ?? b.registerNumber ?? "",
+        );
         return ra.localeCompare(rb, undefined, { numeric: true });
       });
       // Compute stats client-side from merged docs
@@ -1422,9 +1646,8 @@ export default function Dashboard() {
         approved: sorted.filter((d) => d.status === "approved").length,
         rejected: sorted.filter((d) => d.status === "rejected").length,
         checkedIn: sorted.filter((d) => !!d.checkedIn).length,
-        pending: sorted.filter(
-          (d) => !d.status || d.status === "pending",
-        ).length,
+        pending: sorted.filter((d) => !d.status || d.status === "pending")
+          .length,
       };
       setState((prev) => ({
         ...prev,
@@ -1449,8 +1672,7 @@ export default function Dashboard() {
       // Use locally served worker (copied to /public at build time) to avoid
       // CDN fetch failures in all environments including localhost.
       (pdfjsLib as any).GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
-      const pdf = await (pdfjsLib as any)
-        .getDocument({ data: arrayBuffer })
+      const pdf = await (pdfjsLib as any).getDocument({ data: arrayBuffer })
         .promise;
 
       // Collect every text token from every page individually (not joined)
@@ -1466,8 +1688,13 @@ export default function Dashboard() {
         }
       }
 
-      // Join all tokens with a space so multi-token patterns work
-      const fullText = allTokens.join(" ");
+      // Join tokens; omit the space when a number is split across PDF text items
+      // e.g. "6063774315" + "55" → "606377431555" instead of "6063774315 55"
+      let fullText = allTokens[0] ?? "";
+      for (let i = 1; i < allTokens.length; i++) {
+        const sep = /\d$/.test(allTokens[i - 1]) && /^\d/.test(allTokens[i]) ? "" : " ";
+        fullText += sep + allTokens[i];
+      }
 
       const ids = new Set<string>();
 
@@ -1486,7 +1713,11 @@ export default function Dashboard() {
       // ── Pattern 4 ── UTR followed by digits
       const p4 = /UTR\s*:?\s*(\d{9,15})/gi;
 
-      for (const pat of [p1, p2, p3, p4]) {
+      // ── Pattern 5 ── UPI/CR/TXNID/NAME (Canara / SIB / DEP TFR format)
+      // e.g. DEP TFR   UPI/CR/119465302404/KISHORE /CNRB/...
+      const p5 = /UPI\/CR\/(\d{9,15})\//gi;
+
+      for (const pat of [p5, p1, p2, p3, p4]) {
         let m: RegExpExecArray | null;
         while ((m = pat.exec(fullText)) !== null) {
           ids.add(m[1]);
@@ -1500,25 +1731,83 @@ export default function Dashboard() {
     }
   };
 
-  // ── handle PDF upload by user ──────────────────────────────────────────────
-  const handlePdfUpload = async (
-    e: React.ChangeEvent<HTMLInputElement>,
-  ) => {
+  // ── parse Excel / CSV bank statement for transaction IDs ──────────────────
+  const parseExcel = async (file: File): Promise<string[]> => {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const XLSX = await import("xlsx");
+      const workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: "array" });
+
+      const textTokens: string[] = [];
+      for (const sheetName of workbook.SheetNames) {
+        const sheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json<any[]>(sheet, {
+          header: 1,
+          raw: false,
+          defval: "",
+        }) as any[][];
+        for (const row of rows) {
+          for (const cell of row) {
+            const s = String(cell ?? "").trim();
+            if (s) textTokens.push(s);
+          }
+        }
+      }
+
+      // Join tokens; omit the space when a number is split across cells
+      let fullText = textTokens[0] ?? "";
+      for (let i = 1; i < textTokens.length; i++) {
+        const sep = /\d$/.test(textTokens[i - 1]) && /^\d/.test(textTokens[i]) ? "" : " ";
+        fullText += sep + textTokens[i];
+      }
+      const ids = new Set<string>();
+
+      // ── Pattern 5 ── UPI/CR/TXNID/NAME  (DEP TFR / Canara / SIB)
+      const e5 = /UPI\/CR\/(\d{9,15})\//gi;
+      // ── Pattern 1 ── UPI/NAME/TXNID/UPI
+      const e1 = /UPI\/[^/]+?\/(\d{9,15})\/UPI/gi;
+      // ── Pattern 2 ── UPI- or UPI/  (ref-number column)
+      const e2 = /UPI[-/](\d{9,15})/gi;
+      // ── Pattern 3 ── standalone 12-digit UTR
+      const e3 = /\b(\d{12})\b/g;
+      // ── Pattern 4 ── UTR: digits
+      const e4 = /UTR\s*:?\s*(\d{9,15})/gi;
+
+      for (const pat of [e5, e1, e2, e3, e4]) {
+        let m: RegExpExecArray | null;
+        while ((m = pat.exec(fullText)) !== null) {
+          ids.add(m[1]);
+        }
+      }
+
+      return Array.from(ids);
+    } catch (e: unknown) {
+      toast("Excel parse error: " + (e as Error).message, "error");
+      return [];
+    }
+  };
+
+  // ── handle bank statement upload (PDF or Excel) ──────────────────────────
+  const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setPdfFileName(file.name);
-    showLoading("Parsing PDF statement...");
-    const ids = await parsePdf(file);
+    const isExcel = /\.(xlsx|xls|csv)$/i.test(file.name);
+    showLoading(isExcel ? "Parsing Excel statement..." : "Parsing PDF statement...");
+    const ids = isExcel ? await parseExcel(file) : await parsePdf(file);
     hideLoading();
     if (ids.length === 0) {
-      toast("No transaction IDs found in the uploaded PDF", "error");
+      toast(`No transaction IDs found in the uploaded ${isExcel ? "Excel" : "PDF"}`, "error");
       setPdfTxIds(null);
       setPdfTxIdList([]);
       setPdfFileName("");
     } else {
       setPdfTxIds(new Set(ids));
       setPdfTxIdList(ids);
-      toast(`Found ${ids.length} transaction ID(s) in PDF – filtering list`, "success");
+      toast(
+        `Found ${ids.length} transaction ID(s) in ${isExcel ? "Excel" : "PDF"} – filtering list`,
+        "success",
+      );
     }
     // Reset file input so the same file can be re-uploaded
     if (pdfInputRef.current) pdfInputRef.current.value = "";
@@ -1533,7 +1822,9 @@ export default function Dashboard() {
       : (() => {
           if (state.col === "__all__") {
             const found = state.docs.find((d) => String(d._id) === id);
-            return found ? String((found as any).__col ?? state.col) : state.col;
+            return found
+              ? String((found as any).__col ?? state.col)
+              : state.col;
           }
           return state.col;
         })();
@@ -1549,12 +1840,12 @@ export default function Dashboard() {
       if (isScanner) {
         setState((prev) => ({ ...prev, details: null }));
       } else {
-        const doc = serialise(
-          await api<Doc>(
-            "GET",
-            `/databases/${dbToUse}/collections/${colToUse}/documents/${id}`,
-          ),
+        const { data: rawDoc, fromCache } = await apiWithMeta<Doc>(
+          "GET",
+          `/databases/${dbToUse}/collections/${colToUse}/documents/${id}`,
         );
+        const doc = serialise(rawDoc);
+        setDetailSource(fromCache ? "redis" : "db");
         // Preserve __eventName and __col metadata from the list entry (for all-events mode)
         const listEntry = state.docs.find((d) => String(d._id) === id);
         if (listEntry) {
@@ -1645,7 +1936,28 @@ export default function Dashboard() {
   // ── add / edit ────────────────────────────────────────────────────────────
   const openAddModal = () => {
     setState((prev) => ({ ...prev, editingDoc: null }));
-    setEditFormData({ name: "", email: "", eventName: "" });
+    // Pre-select event when a specific collection is already open
+    const preselectedEvent =
+      state.col && state.col !== "__all__"
+        ? (DISPLAY_NAME_MAP[state.col] ?? "")
+        : isRegistrar && assignedEvent && assignedEvent !== "*"
+          ? (DISPLAY_NAME_MAP[assignedEvent] ?? "")
+          : "";
+    setEditFormData({
+      firstName: "",
+      lastName: "",
+      email: "",
+      contactNumber: "",
+      gender: "",
+      paymentMode: "",
+      transactionId: "",
+      collegeName: "",
+      department: "",
+      yearOfStudy: "",
+      collegeRegisterNumber: "",
+      city: "",
+      eventName: preselectedEvent,
+    });
     openModal("doc");
   };
 
@@ -1677,13 +1989,36 @@ export default function Dashboard() {
 
   const saveDoc = async () => {
     const data: Record<string, unknown> = { ...editFormData };
-    const col = effectiveCol();
+    let col = effectiveCol();
 
     if (state.editingDoc) {
       Object.keys(data).forEach((k) => {
         if (data[k] === "[IMAGE DATA PRESERVED]" && state.editingDoc![k])
           data[k] = state.editingDoc![k];
       });
+    } else {
+      // For new docs: derive target collection from the chosen event name
+      const colFromEvent =
+        EVENT_DISPLAY_TO_COLLECTION[String(data.eventName ?? "")];
+      if (colFromEvent) col = colFromEvent;
+      // Drop transactionId when payment is Cash
+      if (data.paymentMode !== "UPI") delete data.transactionId;
+      // Validate required fields
+      const required = [
+        "firstName", "lastName", "email", "contactNumber",
+        "gender", "paymentMode", "collegeName", "department",
+        "yearOfStudy", "collegeRegisterNumber", "city", "eventName",
+      ];
+      for (const f of required) {
+        if (!String(data[f] ?? "").trim()) {
+          toast(`${formatKey(f)} is required`, "error");
+          return;
+        }
+      }
+      if (data.paymentMode === "UPI" && !String(data.transactionId ?? "").trim()) {
+        toast("Transaction ID is required for UPI payment", "error");
+        return;
+      }
     }
 
     closeModal("doc");
@@ -1753,55 +2088,50 @@ export default function Dashboard() {
     const XLSX = await import("xlsx");
     // "__all__" mode: we already have all docs in state – export them directly
     if (state.col === "__all__") {
-      const docs = state.filtered.length ? state.filtered : state.docs;
-      if (!docs.length) { toast("No records to export", "info"); return; }
-      const keysSet = new Set<string>();
-      docs.forEach((d) =>
-        Object.keys(d).forEach((k) => { if (!isImageKey(k) && k !== "__col") keysSet.add(k); }),
-      );
-      keysSet.delete("__eventName");
-      const keys = ["__eventName", ...Array.from(keysSet)];
-      const headerRow = keys.map((k) =>
-        k === "__eventName" ? "Event Name" : formatKey(k),
-      );
+      // Always export `filtered` — when no filter is active, filtered === docs;
+      // using docs as fallback would silently export everything when the filter returns 0 results
+      const docs = state.filtered;
+      if (!docs.length) {
+        toast("No records to export", "info");
+        return;
+      }
+      const headerRow = EXCEL_EXPORT_COLUMNS.map((col) => col.header);
       const rows = [
         headerRow,
         ...docs.map((d) =>
-          keys.map((k) => {
-            const v = (d as any)[k];
-            if (v == null) return "";
-            if (DATE_FIELD_KEYS.has(k) || isIsoDateString(v))
-              return formatDateTime(v as string | number | Date | null);
-            if (typeof v === "object") return JSON.stringify(v);
-            return String(v);
-          }),
+          EXCEL_EXPORT_COLUMNS.map((col) => getExcelValue(d, col.field)),
         ),
       ];
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), "All Events");
-      XLSX.writeFile(wb, `all_events_${new Date().toISOString().split("T")[0]}.xlsx`);
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.aoa_to_sheet(rows),
+        "All Events",
+      );
+      XLSX.writeFile(
+        wb,
+        `all_events_${new Date().toISOString().split("T")[0]}.xlsx`,
+      );
       toast("Exported successfully", "success");
       return;
     }
-    // If a specific collection is selected, keep existing behavior
+    // If a specific collection is selected, use fixed column structure
     if (state.col) {
       const docs = state.docs;
       if (!docs.length) {
         toast("No records to export", "info");
         return;
       }
-      const keys = Object.keys(docs[0]).filter((k) => !isImageKey(k));
+      // Add event name to each doc for consistent export
+      const docsWithEvent = docs.map((d) => ({
+        ...d,
+        __eventName: getEventDisplayName(state.col) || state.col,
+      }));
+      const headerRow = EXCEL_EXPORT_COLUMNS.map((col) => col.header);
       const rows = [
-        keys.map(formatKey),
-        ...docs.map((d) =>
-          keys.map((k) => {
-            const v = d[k];
-            if (v == null) return "";
-            if (DATE_FIELD_KEYS.has(k) || isIsoDateString(v))
-              return formatDateTime(v as string | number | Date | null);
-            if (typeof v === "object") return JSON.stringify(v);
-            return String(v);
-          }),
+        headerRow,
+        ...docsWithEvent.map((d) =>
+          EXCEL_EXPORT_COLUMNS.map((col) => getExcelValue(d, col.field)),
         ),
       ];
 
@@ -1846,31 +2176,13 @@ export default function Dashboard() {
         return;
       }
 
-      // build a consistent header set across all docs
-      const keysSet = new Set<string>();
-      allDocs.forEach((d) =>
-        Object.keys(d).forEach((k) => {
-          if (!isImageKey(k)) keysSet.add(k);
-        }),
-      );
-      // ensure our synthetic event name column is first and has a friendly header
-      keysSet.delete("__eventName");
-      const keys = ["__eventName", ...Array.from(keysSet)];
-      const headerRow = keys.map((k) =>
-        k === "__eventName" ? "Event Name" : formatKey(k),
-      );
+      // Use fixed column structure for consistent export
+      const headerRow = EXCEL_EXPORT_COLUMNS.map((col) => col.header);
 
       const rows = [
         headerRow,
         ...allDocs.map((d) =>
-          keys.map((k) => {
-            const v = (d as any)[k];
-            if (v == null) return "";
-            if (DATE_FIELD_KEYS.has(k) || isIsoDateString(v))
-              return formatDateTime(v as string | number | Date | null);
-            if (typeof v === "object") return JSON.stringify(v);
-            return String(v);
-          }),
+          EXCEL_EXPORT_COLUMNS.map((col) => getExcelValue(d, col.field)),
         ),
       ];
 
@@ -1901,13 +2213,17 @@ export default function Dashboard() {
     }
     autoRefreshRef.current = setInterval(async () => {
       if (!db || !col) return;
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
       try {
-        const docs = (
-          await api<Doc[]>(
+        const [docsRes, statsRes] = await Promise.all([
+          apiWithMeta<Doc[]>(
             "GET",
             `/databases/${db}/collections/${col}/documents`,
-          )
-        ).map(serialise);
+          ),
+          api<Stats>("GET", `/databases/${db}/collections/${col}/stats`).catch(() => null),
+        ]);
+        const docs = docsRes.data.map(serialise);
+        setDocsSource(docsRes.fromCache ? "redis" : "db");
         setState((prev) => {
           if (
             JSON.stringify(docs.map((d) => d._id)) !==
@@ -1921,11 +2237,7 @@ export default function Dashboard() {
           }
           return prev;
         });
-        const s = await api<Stats>(
-          "GET",
-          `/databases/${db}/collections/${col}/stats`,
-        ).catch(() => null);
-        if (s) setStats(s);
+        if (statsRes) setStats(statsRes);
       } catch {
         /* silent */
       }
@@ -1945,21 +2257,26 @@ export default function Dashboard() {
 
   const colHasData = !!state.col && state.docs.length > 0;
   // Export is enabled when __all__ has data, specific col has data, or cols list is non-empty
-  const exportDisabled = state.col === "__all__"
-    ? state.docs.length === 0
-    : state.col
-    ? !colHasData
-    : !(cols && cols.length > 0);
+  const exportDisabled =
+    state.col === "__all__"
+      ? state.docs.length === 0
+      : state.col
+        ? !colHasData
+        : !(cols && cols.length > 0);
 
   const allowedTabs = (() => {
     if (isScanner) return ["scanner"] as const;
-    if (isViewer) return ["records"] as const;
+    if (isViewer || isRegistrar) return ["records"] as const;
     return ["records", "scanner"] as const;
   })();
 
   // ── render ────────────────────────────────────────────────────────────────
   // Results list component (rendered in sidebar on desktop, in main on mobile)
-  const ResultsList = () => (
+  const ResultsList = ({
+    inlineExpand = false,
+  }: {
+    inlineExpand?: boolean;
+  }) => (
     <ul className="list">
       {state.filtered.length === 0 ? (
         <li className="empty">
@@ -1978,81 +2295,141 @@ export default function Dashboard() {
           const isActive = String(state.selected?._id) === String(doc._id);
           const eventName = (doc as any).__eventName as string | undefined;
           const txId = String(
-            doc.transactionId ?? doc.transaction_id ?? doc.utr ??
-            doc.upiTransactionId ?? doc.paymentId ?? doc.txnId ?? ""
+            doc.transactionId ??
+              doc.transaction_id ??
+              doc.utr ??
+              doc.upiTransactionId ??
+              doc.paymentId ??
+              doc.txnId ??
+              "",
           );
-          const docCol = state.col === "__all__"
-            ? String((doc as any).__col ?? "")
-            : undefined;
+          const docCol =
+            state.col === "__all__"
+              ? String((doc as any).__col ?? "")
+              : undefined;
 
           // PDF match status – only computed when a PDF has been uploaded
           const pdfActive = !!pdfTxIds && pdfTxIds.size > 0;
           const hasMatch = pdfActive && docMatchesPdf(doc, pdfTxIds);
 
           return (
-            <li
-              key={String(doc._id)}
-              className={`list-item${isActive ? " active" : ""}`}
-              onClick={() => {
-                const clickedId = String(doc._id);
-                if (isActive) {
-                  setState((prev) => ({
-                    ...prev,
-                    selected: null,
-                    details: null,
-                  }));
-                  pushUrl(state.col, null);
-                } else {
-                  selectDoc(clickedId, undefined, docCol);
-                }
-              }}
-            >
-              <div className="list-item-name">{name}</div>
-              {email && <div className="list-item-sub">{email}</div>}
-              {eventName && (
-                <div style={{ fontSize: 11, color: "var(--accent)", marginTop: 2 }}>
-                  <i className="fas fa-calendar-alt" style={{ marginRight: 4 }} />
-                  {eventName}
-                </div>
-              )}
-              {txId && (
-                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
-                  <i className="fas fa-receipt" style={{ marginRight: 4 }} />
-                  {txId}
-                </div>
-              )}
-              {/* PDF match badge – shown on every attendee when a PDF is active */}
-              {pdfActive && (
-                <div
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 4,
-                    marginTop: 4,
-                    fontSize: 11,
-                    fontWeight: 600,
-                    padding: "2px 8px",
-                    borderRadius: 20,
-                    background: hasMatch ? "var(--green)22" : "var(--red)18",
-                    color: hasMatch ? "var(--green)" : "var(--red)",
-                    border: `1px solid ${hasMatch ? "var(--green)55" : "var(--red)44"}`,
-                  }}
-                >
-                  <i className={`fas fa-${hasMatch ? "check-circle" : "times-circle"}`} />
-                  {hasMatch ? "ID Match" : "No ID Found"}
-                </div>
-              )}
-              <div className="list-item-meta">
-                {regId ? (
-                  <span style={{ fontSize: 11, color: "var(--muted)" }}>
-                    #{regId.substring(0, 10)}
-                  </span>
-                ) : (
-                  <span />
+            <Fragment key={String(doc._id)}>
+              <li
+                className={`list-item${isActive ? " active" : ""}`}
+                onClick={() => {
+                  const clickedId = String(doc._id);
+                  if (isActive) {
+                    setState((prev) => ({
+                      ...prev,
+                      selected: null,
+                      details: null,
+                    }));
+                    pushUrl(state.col, null);
+                  } else {
+                    selectDoc(clickedId, undefined, docCol);
+                  }
+                }}
+              >
+                <div className="list-item-name">{name}</div>
+                {email && <div className="list-item-sub">{email}</div>}
+                {eventName && (
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "var(--accent)",
+                      marginTop: 2,
+                    }}
+                  >
+                    <i
+                      className="fas fa-calendar-alt"
+                      style={{ marginRight: 4 }}
+                    />
+                    {eventName}
+                  </div>
                 )}
-                <StatusPill status={docStatus} />
-              </div>
-            </li>
+                {txId && (
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "var(--muted)",
+                      marginTop: 2,
+                    }}
+                  >
+                    <i className="fas fa-receipt" style={{ marginRight: 4 }} />
+                    {txId}
+                  </div>
+                )}
+                {/* PDF match badge – shown on every attendee when a PDF is active */}
+                {pdfActive && (
+                  <div
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                      marginTop: 4,
+                      fontSize: 11,
+                      fontWeight: 600,
+                      padding: "2px 8px",
+                      borderRadius: 20,
+                      background: hasMatch ? "var(--green)22" : "var(--red)18",
+                      color: hasMatch ? "var(--green)" : "var(--red)",
+                      border: `1px solid ${hasMatch ? "var(--green)55" : "var(--red)44"}`,
+                    }}
+                  >
+                    <i
+                      className={`fas fa-${hasMatch ? "check-circle" : "times-circle"}`}
+                    />
+                    {hasMatch ? "ID Match" : "No ID Found"}
+                  </div>
+                )}
+                <div className="list-item-meta">
+                  {regId ? (
+                    <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                      #{regId.substring(0, 10)}
+                    </span>
+                  ) : (
+                    <span />
+                  )}
+                  <StatusPill status={docStatus} />
+                </div>
+              </li>
+              {/* Inline accordion expansion – only for mobile (inlineExpand mode) */}
+              {inlineExpand && isActive && state.details && (
+                <li
+                  key={`${String(doc._id)}-detail`}
+                  style={{ listStyle: "none", padding: 0 }}
+                >
+                  <DocDetail
+                    doc={state.details}
+                    onApprove={approveDoc}
+                    onOpenReject={openRejectModal}
+                    onEdit={openEditModal}
+                    onDelete={openDeleteModal}
+                    onResend={async (id: string) => {
+                      const col = effectiveCol();
+                      showLoading("Resending email...");
+                      try {
+                        await api(
+                          "POST",
+                          `/databases/${state.db}/collections/${col}/documents/${id}/resend`,
+                        );
+                        toast("Email resent to attendee.", "success");
+                        if (state.col !== "__all__")
+                          await loadDocs(state.db, col);
+                        else await loadAllDocs();
+                        await selectDoc(id);
+                      } catch (e: unknown) {
+                        toast((e as Error).message, "error");
+                      } finally {
+                        hideLoading();
+                      }
+                    }}
+                    isAdmin={isAdmin}
+                    cacheSource={detailSource}
+                  />
+                </li>
+              )}
+            </Fragment>
           );
         })
       )}
@@ -2089,7 +2466,7 @@ export default function Dashboard() {
               onChange={(e) => onColChange(e.target.value)}
               disabled={!state.db}
             >
-              <option value="">Select Collection</option>
+              <option value="">Select Event</option>
               <option value="__all__">All Events</option>
               {cols.map((c) => (
                 <option key={c} value={c}>
@@ -2097,6 +2474,51 @@ export default function Dashboard() {
                 </option>
               ))}
             </select>
+          </div>
+        ) : isRegistrar ? (
+          <div className="header-selects">
+            <div
+              style={{
+                padding: "8px 12px",
+                borderRadius: 6,
+                background: "var(--card)",
+                fontSize: 13,
+              }}
+            >
+              Database: <strong style={{ marginLeft: 6 }}>test</strong>
+            </div>
+            {assignedEvent === "*" ? (
+              <select
+                value={state.col}
+                onChange={(e) =>
+                  setState((s) => ({ ...s, col: e.target.value }))
+                }
+              >
+                <option value="">Select Event</option>
+                {EVENT_OPTIONS.map((ev) => (
+                  <option
+                    key={ev}
+                    value={EVENT_DISPLAY_TO_COLLECTION[ev] ?? ev}
+                  >
+                    {ev}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 6,
+                  background: "var(--card)",
+                  fontSize: 13,
+                }}
+              >
+                Event:{" "}
+                <strong style={{ marginLeft: 6 }}>
+                  {assignedEvent ? getEventDisplayName(assignedEvent) : "—"}
+                </strong>
+              </div>
+            )}
           </div>
         ) : isViewer ? (
           <div className="header-selects">
@@ -2175,6 +2597,14 @@ export default function Dashboard() {
               <i className="fas fa-download" /> Export
             </button>
           )}
+          {isRegistrar && (
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={openAddModal}
+            >
+              <i className="fas fa-plus" /> Add Participant
+            </button>
+          )}
           {isAdmin && (
             <>
               <button
@@ -2187,7 +2617,6 @@ export default function Dashboard() {
               <button
                 className="btn btn-primary btn-sm"
                 onClick={openAddModal}
-                disabled={!state.col}
               >
                 <i className="fas fa-plus" /> Add
               </button>
@@ -2241,7 +2670,7 @@ export default function Dashboard() {
       {/* MAIN */}
       <div className={`main main--${activeTab}`}>
         {/* Desktop inline sidebar content (no drawer) */}
-        {!isScanner && (
+        {!isScanner && !isRegistrar && (
           <div
             className="sidebar-inline desktop-only"
             style={{
@@ -2260,11 +2689,32 @@ export default function Dashboard() {
                 {state.col === "__all__"
                   ? "⚡ All Events"
                   : state.col
-                  ? getEventDisplayName(state.col)
-                  : "All Records"}
+                    ? getEventDisplayName(state.col)
+                    : "All Records"}
               </span>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <CachePill source={docsSource} />
                 <span className="badge">{state.filtered.length}</span>
+                {isAdmin && state.col && (
+                  <>
+                    <button
+                      className="btn btn-primary btn-sm"
+                      style={{ padding: "2px 8px", fontSize: 11 }}
+                      onClick={openAddModal}
+                      title="Add Participant"
+                    >
+                      <i className="fas fa-plus" /> Add
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      style={{ padding: "2px 8px", fontSize: 11 }}
+                      onClick={openUsersModal}
+                      title="Manage Users"
+                    >
+                      <i className="fas fa-users-cog" />
+                    </button>
+                  </>
+                )}
               </div>
             </div>
             <div
@@ -2302,80 +2752,99 @@ export default function Dashboard() {
               />
             </div>
             {/* PDF bank-statement filter – admin only */}
-            {isAdmin && <div
-              style={{
-                padding: "8px 12px",
-                borderBottom: "1px solid var(--border)",
-              }}
-            >
-              <input
-                ref={pdfInputRef}
-                type="file"
-                accept=".pdf"
-                style={{ display: "none" }}
-                onChange={handlePdfUpload}
-              />
-              {pdfTxIds ? (
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                    fontSize: 12,
-                    background: "var(--accent)18",
-                    border: "1px solid var(--accent)44",
-                    borderRadius: 8,
-                    padding: "6px 10px",
-                  }}
-                >
-                  <i
-                    className="fas fa-file-pdf"
-                    style={{ color: "var(--red)" }}
-                  />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ color: "var(--accent)", fontWeight: 600, fontSize: 11 }}>
-                      {state.filtered.filter((d) => docMatchesPdf(d, pdfTxIds)).length}
-                      {" / "}{state.filtered.length} attendees matched
-                    </div>
-                    <div style={{ color: "var(--muted)", fontSize: 10, marginTop: 1 }}>
-                      {pdfTxIds?.size ?? 0} transaction ID(s) from PDF
-                    </div>
-                  </div>
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    style={{ padding: "2px 6px", fontSize: 10 }}
-                    onClick={() => setShowPdfIds(true)}
-                    title="View extracted IDs"
-                  >
-                    <i className="fas fa-list" />
-                  </button>
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    style={{ padding: "2px 6px", fontSize: 10 }}
-                    onClick={() => {
-                      setPdfTxIds(null);
-                      setPdfFileName("");
-                      setPdfTxIdList([]);
+            {isAdmin && (
+              <div
+                style={{
+                  padding: "8px 12px",
+                  borderBottom: "1px solid var(--border)",
+                }}
+              >
+                <input
+                  ref={pdfInputRef}
+                  type="file"
+                  accept=".pdf,.xlsx,.xls,.csv"
+                  style={{ display: "none" }}
+                  onChange={handlePdfUpload}
+                />
+                {pdfTxIds ? (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      fontSize: 12,
+                      background: "var(--accent)18",
+                      border: "1px solid var(--accent)44",
+                      borderRadius: 8,
+                      padding: "6px 10px",
                     }}
-                    title="Clear filter"
                   >
-                    <i className="fas fa-times" />
+                    <i
+                      className="fas fa-file-invoice"
+                      style={{ color: "var(--accent)" }}
+                    />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{
+                          color: "var(--accent)",
+                          fontWeight: 600,
+                          fontSize: 11,
+                        }}
+                      >
+                        {
+                          state.filtered.filter((d) =>
+                            docMatchesPdf(d, pdfTxIds),
+                          ).length
+                        }
+                        {" / "}
+                        {state.filtered.length} attendees matched
+                      </div>
+                      <div
+                        style={{
+                          color: "var(--muted)",
+                          fontSize: 10,
+                          marginTop: 1,
+                        }}
+                      >
+                        {pdfTxIds?.size ?? 0} transaction ID(s) from statement
+                      </div>
+                    </div>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      style={{ padding: "2px 6px", fontSize: 10 }}
+                      onClick={() => setShowPdfIds(true)}
+                      title="View extracted IDs"
+                    >
+                      <i className="fas fa-list" />
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      style={{ padding: "2px 6px", fontSize: 10 }}
+                      onClick={() => {
+                        setPdfTxIds(null);
+                        setPdfFileName("");
+                        setPdfTxIdList([]);
+                      }}
+                      title="Clear filter"
+                    >
+                      <i className="fas fa-times" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ width: "100%", fontSize: 12 }}
+                    onClick={() => pdfInputRef.current?.click()}
+                  >
+                    <i
+                      className="fas fa-file-invoice"
+                      style={{ color: "var(--accent)", marginRight: 6 }}
+                    />
+                    Upload Bank Statement
                   </button>
-                </div>
-              ) : (
-                <button
-                  className="btn btn-ghost btn-sm"
-                  style={{ width: "100%", fontSize: 12 }}
-                  onClick={() => pdfInputRef.current?.click()}
-                >
-                  <i
-                    className="fas fa-file-pdf"
-                    style={{ color: "var(--red)", marginRight: 6 }}
-                  />
-                  Upload Bank Statement PDF
-                </button>
-              )}
-            </div>}
+                )}
+              </div>
+            )}
             <ResultsList />
           </div>
         )}
@@ -2387,6 +2856,49 @@ export default function Dashboard() {
         >
           <div className="content">
             {stats && <StatsGrid stats={stats} />}
+            {/* Registrar: only show a simple add-participant prompt */}
+            {isRegistrar && (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  minHeight: 320,
+                  gap: 16,
+                  textAlign: "center",
+                  padding: 32,
+                }}
+              >
+                <div
+                  style={{
+                    width: 64,
+                    height: 64,
+                    borderRadius: "50%",
+                    background: "var(--accent)18",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 28,
+                    color: "var(--accent)",
+                  }}
+                >
+                  <i className="fas fa-user-plus" />
+                </div>
+                <h3 style={{ margin: 0, fontWeight: 700 }}>Register Participant</h3>
+                <p style={{ margin: 0, color: "var(--muted)", fontSize: 14, maxWidth: 320 }}>
+                  {assignedEvent && assignedEvent !== "*"
+                    ? `You are authorised to add participants for: ${getEventDisplayName(assignedEvent)}`
+                    : "Select an event from the header, then click Add Participant."}
+                </p>
+                <button
+                  className="btn btn-primary"
+                  onClick={openAddModal}
+                >
+                  <i className="fas fa-plus" /> Add Participant
+                </button>
+              </div>
+            )}
             {/* Mobile: place filters below stats and results below filters */}
             {(isAdmin || isViewer) && (
               <div className="mobile-only" style={{ padding: "12px 0" }}>
@@ -2417,6 +2929,25 @@ export default function Dashboard() {
                     onChange={(e) => setSearchQ(e.target.value)}
                   />
                 </div>
+                {/* Mobile Add / Users buttons for admin */}
+                {isAdmin && state.col && (
+                  <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                    <button
+                      className="btn btn-primary btn-sm"
+                      style={{ flex: 1, fontSize: 12 }}
+                      onClick={openAddModal}
+                    >
+                      <i className="fas fa-plus" /> Add Participant
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      style={{ fontSize: 12 }}
+                      onClick={openUsersModal}
+                    >
+                      <i className="fas fa-users-cog" /> Users
+                    </button>
+                  </div>
+                )}
                 {/* Mobile PDF filter */}
                 <div style={{ marginTop: 8 }}>
                   {pdfTxIds ? (
@@ -2432,14 +2963,27 @@ export default function Dashboard() {
                         padding: "6px 10px",
                       }}
                     >
-                      <i className="fas fa-file-pdf" style={{ color: "var(--red)" }} />
-                      <span style={{ flex: 1, color: "var(--accent)", fontWeight: 600 }}>
-                        PDF: {pdfTxIds.size} ID(s) matched
+                      <i
+                        className="fas fa-file-invoice"
+                        style={{ color: "var(--accent)" }}
+                      />
+                      <span
+                        style={{
+                          flex: 1,
+                          color: "var(--accent)",
+                          fontWeight: 600,
+                        }}
+                      >
+                        Statement: {pdfTxIds.size} ID(s) matched
                       </span>
                       <button
                         className="btn btn-ghost btn-sm"
                         style={{ padding: "2px 8px", fontSize: 11 }}
-                        onClick={() => { setPdfTxIds(null); setPdfFileName(""); setPdfTxIdList([]); }}
+                        onClick={() => {
+                          setPdfTxIds(null);
+                          setPdfFileName("");
+                          setPdfTxIdList([]);
+                        }}
                       >
                         <i className="fas fa-times" /> Clear
                       </button>
@@ -2451,62 +2995,67 @@ export default function Dashboard() {
                       onClick={() => pdfInputRef.current?.click()}
                     >
                       <i
-                        className="fas fa-file-pdf"
-                        style={{ color: "var(--red)", marginRight: 6 }}
+                        className="fas fa-file-invoice"
+                        style={{ color: "var(--accent)", marginRight: 6 }}
                       />
-                      Upload Bank Statement PDF
+                      Upload Bank Statement
                     </button>
                   )}
                 </div>
               </div>
             )}
             <div className="mobile-only" style={{ paddingTop: 12 }}>
-              <ResultsList />
+              <ResultsList inlineExpand={true} />
             </div>
-            {state.details ? (
-              <DocDetail
-                doc={state.details}
-                onApprove={approveDoc}
-                onOpenReject={openRejectModal}
-                onEdit={openEditModal}
-                onDelete={openDeleteModal}
-                onResend={async (id: string) => {
-                  const col = effectiveCol();
-                  showLoading("Resending email...");
-                  try {
-                    await api(
-                      "POST",
-                      `/databases/${state.db}/collections/${col}/documents/${id}/resend`,
-                    );
-                    toast("Email resent to attendee.", "success");
-                    if (state.col !== "__all__") await loadDocs(state.db, col);
-                    else await loadAllDocs();
-                    await selectDoc(id);
-                  } catch (e: unknown) {
-                    toast((e as Error).message, "error");
-                  } finally {
-                    hideLoading();
-                  }
-                }}
-                isAdmin={isAdmin}
-              />
-            ) : !state.col ? (
-              <div className="placeholder">
-                <div className="placeholder-icon">
-                  <i className="fas fa-database" />
+            {/* Desktop: detail panel shown alongside sidebar (hidden on mobile via CSS) */}
+            <div className="desktop-only">
+              {state.details ? (
+                <DocDetail
+                  doc={state.details}
+                  onApprove={approveDoc}
+                  onOpenReject={openRejectModal}
+                  onEdit={openEditModal}
+                  onDelete={openDeleteModal}
+                  onResend={async (id: string) => {
+                    const col = effectiveCol();
+                    showLoading("Resending email...");
+                    try {
+                      await api(
+                        "POST",
+                        `/databases/${state.db}/collections/${col}/documents/${id}/resend`,
+                      );
+                      toast("Email resent to attendee.", "success");
+                      if (state.col !== "__all__")
+                        await loadDocs(state.db, col);
+                      else await loadAllDocs();
+                      await selectDoc(id);
+                    } catch (e: unknown) {
+                      toast((e as Error).message, "error");
+                    } finally {
+                      hideLoading();
+                    }
+                  }}
+                  isAdmin={isAdmin}
+                  cacheSource={detailSource}
+                />
+              ) : !state.col ? (
+                <div className="placeholder">
+                  <div className="placeholder-icon">
+                    <i className="fas fa-database" />
+                  </div>
+                  <h3>
+                    {state.col === "__all__"
+                      ? "Showing all events"
+                      : "Select a collection to begin"}
+                  </h3>
+                  <p style={{ fontSize: 14, marginTop: 8 }}>
+                    {state.col === "__all__"
+                      ? "All event attendees are listed below. Use search or upload a PDF to filter by transaction ID."
+                      : "Choose a database and collection from the header"}
+                  </p>
                 </div>
-                <h3>
-                  {state.col === "__all__"
-                    ? "Showing all events"
-                    : "Select a collection to begin"}
-                </h3>
-                <p style={{ fontSize: 14, marginTop: 8 }}>
-                  {state.col === "__all__"
-                    ? "All event attendees are listed below. Use search or upload a PDF to filter by transaction ID."
-                    : "Choose a database and collection from the header"}
-                </p>
-              </div>
-            ) : null}
+              ) : null}
+            </div>
           </div>
         </div>
 
@@ -2563,7 +3112,7 @@ export default function Dashboard() {
       {/* ── ADD/EDIT DOC MODAL ── */}
       {modals.doc && (
         <div className="modal-overlay open">
-          <div className="modal" style={{ minWidth: 600, maxWidth: "90vw" }}>
+          <div className="modal" style={{ minWidth: 640, maxWidth: "95vw" }}>
             <div className="modal-title">
               <i
                 className={`fas fa-${state.editingDoc ? "edit" : "plus"}`}
@@ -2576,45 +3125,250 @@ export default function Dashboard() {
             >
               {state.editingDoc
                 ? "Update participant details. Fields marked [IMAGE DATA PRESERVED] cannot be edited here."
-                : "Fill out the participant details."}
+                : "Fields marked * are required."}
             </p>
             <div
               style={{
                 display: "grid",
                 gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
                 gap: 16,
-                maxHeight: "60vh",
+                maxHeight: "65vh",
                 overflowY: "auto",
                 paddingRight: 8,
               }}
             >
-              {Object.entries(editFormData).map(([key, val]) => (
-                <div
-                  key={key}
-                  className="form-group"
-                  style={{ marginBottom: 0 }}
-                >
-                  <label
-                    className="form-label"
-                    style={{ textTransform: "capitalize" }}
+              {!state.editingDoc ? (
+                /* ── Structured Add form ── */
+                <>
+                  {/* Event Name */}
+                  <div className="form-group" style={{ marginBottom: 0, gridColumn: "1 / -1" }}>
+                    <label className="form-label">Event Name *</label>
+                    <select
+                      className="form-input"
+                      value={String(editFormData.eventName ?? "")}
+                      disabled={
+                        isRegistrar &&
+                        !!assignedEvent &&
+                        assignedEvent !== "*"
+                      }
+                      onChange={(e) =>
+                        setEditFormData((prev) => ({ ...prev, eventName: e.target.value }))
+                      }
+                    >
+                      <option value="">— Select Event —</option>
+                      {EVENT_OPTIONS.map((ev) => (
+                        <option key={ev} value={ev}>{ev}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* First Name */}
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">First Name *</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={String(editFormData.firstName ?? "")}
+                      onChange={(e) =>
+                        setEditFormData((prev) => ({ ...prev, firstName: e.target.value }))
+                      }
+                    />
+                  </div>
+
+                  {/* Last Name */}
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Last Name *</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={String(editFormData.lastName ?? "")}
+                      onChange={(e) =>
+                        setEditFormData((prev) => ({ ...prev, lastName: e.target.value }))
+                      }
+                    />
+                  </div>
+
+                  {/* Email */}
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Email *</label>
+                    <input
+                      type="email"
+                      className="form-input"
+                      value={String(editFormData.email ?? "")}
+                      onChange={(e) =>
+                        setEditFormData((prev) => ({ ...prev, email: e.target.value }))
+                      }
+                    />
+                  </div>
+
+                  {/* Contact Number */}
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Contact Number *</label>
+                    <input
+                      type="tel"
+                      className="form-input"
+                      value={String(editFormData.contactNumber ?? "")}
+                      onChange={(e) =>
+                        setEditFormData((prev) => ({ ...prev, contactNumber: e.target.value }))
+                      }
+                    />
+                  </div>
+
+                  {/* Gender */}
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Gender *</label>
+                    <select
+                      className="form-input"
+                      value={String(editFormData.gender ?? "")}
+                      onChange={(e) =>
+                        setEditFormData((prev) => ({ ...prev, gender: e.target.value }))
+                      }
+                    >
+                      <option value="">— Select —</option>
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+
+                  {/* Payment Mode */}
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Payment Mode *</label>
+                    <select
+                      className="form-input"
+                      value={String(editFormData.paymentMode ?? "")}
+                      onChange={(e) =>
+                        setEditFormData((prev) => ({
+                          ...prev,
+                          paymentMode: e.target.value,
+                          transactionId: e.target.value === "Cash" ? "" : prev.transactionId,
+                        }))
+                      }
+                    >
+                      <option value="">— Select —</option>
+                      <option value="UPI">UPI</option>
+                      <option value="Cash">Cash</option>
+                    </select>
+                  </div>
+
+                  {/* Transaction ID – only for UPI */}
+                  {editFormData.paymentMode === "UPI" && (
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">Transaction ID (UPI) *</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={String(editFormData.transactionId ?? "")}
+                        onChange={(e) =>
+                          setEditFormData((prev) => ({ ...prev, transactionId: e.target.value }))
+                        }
+                      />
+                    </div>
+                  )}
+
+                  {/* College Name */}
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">College Name *</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={String(editFormData.collegeName ?? "")}
+                      onChange={(e) =>
+                        setEditFormData((prev) => ({ ...prev, collegeName: e.target.value }))
+                      }
+                    />
+                  </div>
+
+                  {/* Department */}
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Department *</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={String(editFormData.department ?? "")}
+                      onChange={(e) =>
+                        setEditFormData((prev) => ({ ...prev, department: e.target.value }))
+                      }
+                    />
+                  </div>
+
+                  {/* Year of Study */}
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Year of Study *</label>
+                    <select
+                      className="form-input"
+                      value={String(editFormData.yearOfStudy ?? "")}
+                      onChange={(e) =>
+                        setEditFormData((prev) => ({ ...prev, yearOfStudy: e.target.value }))
+                      }
+                    >
+                      <option value="">— Select —</option>
+                      <option value="1st Year">1st Year</option>
+                      <option value="2nd Year">2nd Year</option>
+                      <option value="3rd Year">3rd Year</option>
+                      <option value="4th Year">4th Year</option>
+                    </select>
+                  </div>
+
+                  {/* College Register Number */}
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">College Register Number *</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={String(editFormData.collegeRegisterNumber ?? "")}
+                      onChange={(e) =>
+                        setEditFormData((prev) => ({
+                          ...prev,
+                          collegeRegisterNumber: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+
+                  {/* City */}
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">City *</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={String(editFormData.city ?? "")}
+                      onChange={(e) =>
+                        setEditFormData((prev) => ({ ...prev, city: e.target.value }))
+                      }
+                    />
+                  </div>
+                </>
+              ) : (
+                /* ── Generic Edit form ── */
+                Object.entries(editFormData).map(([key, val]) => (
+                  <div
+                    key={key}
+                    className="form-group"
+                    style={{ marginBottom: 0 }}
                   >
-                    {formatKey(key)}
-                  </label>
-                  <input
-                    type={typeof val === "number" ? "number" : "text"}
-                    className="form-input"
-                    value={val === null || val === undefined ? "" : String(val)}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setEditFormData((prev) => ({
-                        ...prev,
-                        [key]: typeof val === "number" ? Number(v) : v,
-                      }));
-                    }}
-                    disabled={val === "[IMAGE DATA PRESERVED]"}
-                  />
-                </div>
-              ))}
+                    <label
+                      className="form-label"
+                      style={{ textTransform: "capitalize" }}
+                    >
+                      {formatKey(key)}
+                    </label>
+                    <input
+                      type={typeof val === "number" ? "number" : "text"}
+                      className="form-input"
+                      value={val === null || val === undefined ? "" : String(val)}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setEditFormData((prev) => ({
+                          ...prev,
+                          [key]: typeof val === "number" ? Number(v) : v,
+                        }));
+                      }}
+                      disabled={val === "[IMAGE DATA PRESERVED]"}
+                    />
+                  </div>
+                ))
+              )}
             </div>
             <div className="modal-actions" style={{ marginTop: 24 }}>
               <button
@@ -2624,7 +3378,7 @@ export default function Dashboard() {
                 Cancel
               </button>
               <button className="btn btn-primary" onClick={saveDoc}>
-                <i className="fas fa-save" /> Save
+                <i className="fas fa-save" /> {state.editingDoc ? "Save" : "Add"}
               </button>
             </div>
           </div>
@@ -2667,9 +3421,12 @@ export default function Dashboard() {
               <i className="fas fa-file-pdf" style={{ color: "var(--red)" }} />{" "}
               Extracted Transaction IDs from PDF
             </div>
-            <p style={{ color: "var(--muted)", fontSize: 13, marginBottom: 12 }}>
-              {pdfTxIdList.length} transaction ID(s) found in &quot;{pdfFileName}&quot;.
-              Attendees whose records contain any of these IDs are shown in the list.
+            <p
+              style={{ color: "var(--muted)", fontSize: 13, marginBottom: 12 }}
+            >
+              {pdfTxIdList.length} transaction ID(s) found in &quot;
+              {pdfFileName}&quot;. Attendees whose records contain any of these
+              IDs are shown in the list.
             </p>
             <div
               style={{

@@ -5,7 +5,7 @@ import { getEventDisplayName } from '@/lib/events';
 import { isAllowedCollection } from '@/lib/registrationCollections';
 import { ObjectId, Filter, Document } from 'mongodb';
 import { authorize, ROLES } from '@/lib/auth';
-import QRCode from 'qrcode';
+import { invalidateDoc } from '@/lib/cache';
 
 
 // Get coordinators from individual env variables
@@ -47,6 +47,9 @@ export async function POST(
       $set: { status: 'rejected', rejectedAt: new Date(), rejectionReason: reason },
     });
 
+    // Invalidate doc, docs list, and stats caches
+    await invalidateDoc(db, col, id);
+
     const d = doc as Record<string, unknown>;
     const email = String(d.email ?? d.mail ?? d.Email ?? '');
 
@@ -59,9 +62,6 @@ export async function POST(
     const displayName = getEventDisplayName(col);
 
     const coordinators = getCoordinators();
-
-    // choose link: port pass registrations get a separate link when configured
-   
 
     const coordinatorsHtml = coordinators.length > 0
       ? `
