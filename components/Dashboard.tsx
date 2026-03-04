@@ -719,16 +719,13 @@ function ScannerPanel({
       if (scannerRef.current) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const inst = scannerRef.current as any;
-        await inst.stop().catch((err: unknown) => {
-          console.warn("scanner stop error", err);
-        });
+        await inst.stop().catch(() => {});
         try {
           await inst.clear().catch(() => {});
         } catch {}
         scannerRef.current = null;
       }
-    } catch (err) {
-      console.warn("stopScanner error", err);
+    } catch {
       scannerRef.current = null;
     }
   }, []);
@@ -761,8 +758,8 @@ function ScannerPanel({
             cameraIdOrConfig = back && back.id ? back.id : cams[0].id;
           }
         }
-      } catch (e) {
-        console.warn("getCameras failed, falling back to facingMode", e);
+      } catch {
+        // getCameras unavailable – facingMode fallback stays
       }
 
       const onDecode = async (decoded: string, result?: unknown) => {
@@ -770,8 +767,6 @@ function ScannerPanel({
         if (processingRef.current) return;
         processingRef.current = true;
         try {
-          console.log("qr decoded:", decoded);
-          // Process but keep camera running
           await processScan(decoded);
         } catch (e) {
           console.error("onDecode handler error", e);
@@ -783,16 +778,12 @@ function ScannerPanel({
         }
       };
 
-      const onError = (err: unknown) => {
-        // decode attempt failed for a frame - not fatal
-        // keep quiet in production but log for debugging
-        // console.debug('qr decode fail', err);
+      const onError = (_err: unknown) => {
+        // decode attempt failed for a frame – not fatal
       };
 
       const config = { fps: 10, qrbox: { width: 250, height: 250 } } as any;
-      // Start scanner
       await scanner.start(cameraIdOrConfig, config, onDecode, onError);
-      console.log("scanner started", cameraIdOrConfig, config);
     } catch (e: unknown) {
       console.error("startScanner error", e);
       onToast("Camera error: " + String(e), "error");

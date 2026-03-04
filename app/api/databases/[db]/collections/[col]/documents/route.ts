@@ -27,7 +27,6 @@ export async function GET(
   const cacheKey = CacheKey.docs(db, col);
   const cached = await cacheGet<unknown[]>(cacheKey);
   if (cached !== null) {
-    console.info(`[CACHE] HIT docs db=${db} col=${col}`);
     return NextResponse.json(cached, { headers: { 'X-Cache': 'HIT' } });
   }
 
@@ -119,7 +118,6 @@ export async function GET(
     // Serialize MongoDB ObjectId fields to strings before caching
     const serialised = JSON.parse(JSON.stringify(docs));
     await cacheSet(cacheKey, serialised, TTL.DOCS);
-    console.info(`[CACHE] MISS docs db=${db} col=${col} count=${serialised.length}`);
     return NextResponse.json(serialised, { headers: { 'X-Cache': 'MISS' } });
   } catch (e: unknown) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
