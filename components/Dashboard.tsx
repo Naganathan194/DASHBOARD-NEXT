@@ -98,7 +98,7 @@ const isImageVal = (v: unknown): boolean => {
 };
 
 const isImageKey = (k: string): boolean =>
-  /screenshot|image|photo|picture|img|payment|receipt|signature|avatar|profile/i.test(
+  /(screenshot|receipt|receipt_image|payment_screenshot|payment_receipt|image|photo|picture|img|signature|avatar|profile)/i.test(
     k,
   );
 
