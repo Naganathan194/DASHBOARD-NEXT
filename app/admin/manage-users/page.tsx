@@ -194,7 +194,7 @@ export default function ManageUsersPage() {
   };
 
   return (
-    <div style={{ padding: 20 }}>
+    <div className="page-container">
       <div style={{ maxWidth: 980, margin: "0 auto" }}>
         <div
           style={{
@@ -624,6 +624,7 @@ export default function ManageUsersPage() {
         </div>
 
         <style>{`
+          .page-container { height: 100vh; overflow: auto; padding: 20px; -webkit-overflow-scrolling: touch; }
           .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 6px 18px rgba(0,0,0,0.03); margin-bottom: 12px; }
           .card-body { padding: 18px; }
           .card-title { font-weight: 700; margin-bottom: 8px; font-size: 14px; }
@@ -646,6 +647,7 @@ export default function ManageUsersPage() {
           .user-card-row { display: flex; justify-content: space-between; align-items: center; }
 
           @media (max-width: 700px) {
+            .page-container { padding: 12px; }
             .form-grid { grid-template-columns: 1fr; }
             .card { box-shadow: none; }
             .users-table-wrap { display: none; }
