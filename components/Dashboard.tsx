@@ -141,9 +141,35 @@ const EXCEL_EXPORT_COLUMNS = [
   { header: "Created At", field: "createdAt" },
 ] as const;
 
+// Helper to pick first truthy value from field name variations
+const pickField = (doc: Doc, ...keys: string[]): any => {
+  for (const k of keys) {
+    const v = (doc as any)[k];
+    if (v != null && v !== "") return v;
+  }
+  return null;
+};
+
+// Field name variations mapping for flexible data extraction
+const FIELD_VARIATIONS: Record<string, string[]> = {
+  contactNumber: ["contactNumber", "phone", "mobile", "phoneNumber", "contact", "mobileNumber"],
+  gender: ["gender", "Gender"],
+  paymentMode: ["paymentMode", "payment_mode", "modeOfPayment"],
+  collegeName: ["collegeName", "college", "institution", "institutionName", "College"],
+  department: ["department", "dept", "branch", "stream", "Department"],
+  yearOfStudy: ["yearOfStudy", "year", "currentYear", "Year"],
+  collegeRegisterNumber: ["collegeRegisterNumber", "registerNumber", "regNo", "registrationNumber", "rollNumber", "rollNo", "regno", "registerNo"],
+  city: ["city", "City", "location", "place"],
+  workshopName: ["workshopName", "workshop", "eventName"],
+  registrationDate: ["registrationDate", "registration_date"],
+};
+
 // Helper to extract and format field value for Excel export
 const getExcelValue = (doc: Doc, field: string): string => {
-  const v = (doc as any)[field];
+  // Try field variations if defined
+  const variations = FIELD_VARIATIONS[field];
+  const v = variations ? pickField(doc, ...variations) : (doc as any)[field];
+  
   if (v == null) return "";
   if (DATE_FIELD_KEYS.has(field) || isIsoDateString(v)) {
     return formatDateTime(v as string | number | Date | null);
