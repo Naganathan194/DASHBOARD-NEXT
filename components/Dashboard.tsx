@@ -1688,8 +1688,13 @@ export default function Dashboard() {
         }
       }
 
-      // Join all tokens with a space so multi-token patterns work
-      const fullText = allTokens.join(" ");
+      // Join tokens; omit the space when a number is split across PDF text items
+      // e.g. "6063774315" + "55" → "606377431555" instead of "6063774315 55"
+      let fullText = allTokens[0] ?? "";
+      for (let i = 1; i < allTokens.length; i++) {
+        const sep = /\d$/.test(allTokens[i - 1]) && /^\d/.test(allTokens[i]) ? "" : " ";
+        fullText += sep + allTokens[i];
+      }
 
       const ids = new Set<string>();
 
@@ -1749,7 +1754,12 @@ export default function Dashboard() {
         }
       }
 
-      const fullText = textTokens.join(" ");
+      // Join tokens; omit the space when a number is split across cells
+      let fullText = textTokens[0] ?? "";
+      for (let i = 1; i < textTokens.length; i++) {
+        const sep = /\d$/.test(textTokens[i - 1]) && /^\d/.test(textTokens[i]) ? "" : " ";
+        fullText += sep + textTokens[i];
+      }
       const ids = new Set<string>();
 
       // ── Pattern 5 ── UPI/CR/TXNID/NAME  (DEP TFR / Canara / SIB)
