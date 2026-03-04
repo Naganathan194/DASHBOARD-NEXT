@@ -38,12 +38,16 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ db: string; col: string }> },
 ) {
+  const authCheck = await authorize(req, [ROLES.ADMIN, ROLES.REGISTRAR]);
+  if (authCheck instanceof NextResponse) return authCheck;
   const { db, col } = await params;
   if (!isAllowedCollection(col))
     return NextResponse.json(
       { error: "Collection not allowed" },
       { status: 404 },
     );
+  const assignedCheck = assertAssignedEvent(authCheck as Record<string, unknown>, col);
+  if (assignedCheck instanceof NextResponse) return assignedCheck;
   try {
     const body = await req.json();
     const client = await connectToMongo();

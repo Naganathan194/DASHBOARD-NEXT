@@ -4,7 +4,13 @@ import { useEffect, useRef, useState, useCallback, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { getEventDisplayName } from "@/lib/events";
-import { ALLOWED_COLLECTIONS } from "@/lib/registrationCollections";
+import { ALLOWED_COLLECTIONS, DISPLAY_NAME_MAP } from "@/lib/registrationCollections";
+
+// Maps event display names → DB collection names (used by the Add form)
+const EVENT_DISPLAY_TO_COLLECTION: Record<string, string> = Object.fromEntries(
+  Object.entries(DISPLAY_NAME_MAP).map(([col, display]) => [display, col]),
+);
+const EVENT_OPTIONS = Object.values(DISPLAY_NAME_MAP);
 import {
   formatDateTime,
   DATE_FIELD_KEYS,
@@ -1005,6 +1011,7 @@ export default function Dashboard() {
   const isAdmin = userRole === "ADMIN";
   const isViewer = userRole === "ATTENDEE_VIEWER";
   const isScanner = userRole === "SCANNER";
+  const isRegistrar = userRole === "REGISTRAR";
   const [searchQ, setSearchQ] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   // ── PDF transaction-ID filter ──────────────────────────────────────────────
@@ -1197,6 +1204,11 @@ export default function Dashboard() {
             stopAutoRefresh();
           } catch {
             /* ignore */
+          }
+        } else if (role === "REGISTRAR") {
+          // Pre-select assigned event for REGISTRAR so the Add modal can pre-fill
+          if (assigned && assigned !== "*") {
+            setState((s) => ({ ...s, col: assigned! }));
           }
         }
         setConnected(true);
@@ -1559,7 +1571,11 @@ export default function Dashboard() {
       // ── Pattern 4 ── UTR followed by digits
       const p4 = /UTR\s*:?\s*(\d{9,15})/gi;
 
-      for (const pat of [p1, p2, p3, p4]) {
+      // ── Pattern 5 ── UPI/CR/TXNID/NAME (Canara / SIB / DEP TFR format)
+      // e.g. DEP TFR   UPI/CR/119465302404/KISHORE /CNRB/...
+      const p5 = /UPI\/CR\/(\d{9,15})\//gi;
+
+      for (const pat of [p5, p1, p2, p3, p4]) {
         let m: RegExpExecArray | null;
         while ((m = pat.exec(fullText)) !== null) {
           ids.add(m[1]);
@@ -1573,16 +1589,68 @@ export default function Dashboard() {
     }
   };
 
-  // ── handle PDF upload by user ──────────────────────────────────────────────
+  // ── parse Excel / CSV bank statement for transaction IDs ──────────────────
+  const parseExcel = async (file: File): Promise<string[]> => {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const XLSX = await import("xlsx");
+      const workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: "array" });
+
+      const textTokens: string[] = [];
+      for (const sheetName of workbook.SheetNames) {
+        const sheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json<any[]>(sheet, {
+          header: 1,
+          raw: false,
+          defval: "",
+        }) as any[][];
+        for (const row of rows) {
+          for (const cell of row) {
+            const s = String(cell ?? "").trim();
+            if (s) textTokens.push(s);
+          }
+        }
+      }
+
+      const fullText = textTokens.join(" ");
+      const ids = new Set<string>();
+
+      // ── Pattern 5 ── UPI/CR/TXNID/NAME  (DEP TFR / Canara / SIB)
+      const e5 = /UPI\/CR\/(\d{9,15})\//gi;
+      // ── Pattern 1 ── UPI/NAME/TXNID/UPI
+      const e1 = /UPI\/[^/]+?\/(\d{9,15})\/UPI/gi;
+      // ── Pattern 2 ── UPI- or UPI/  (ref-number column)
+      const e2 = /UPI[-/](\d{9,15})/gi;
+      // ── Pattern 3 ── standalone 12-digit UTR
+      const e3 = /\b(\d{12})\b/g;
+      // ── Pattern 4 ── UTR: digits
+      const e4 = /UTR\s*:?\s*(\d{9,15})/gi;
+
+      for (const pat of [e5, e1, e2, e3, e4]) {
+        let m: RegExpExecArray | null;
+        while ((m = pat.exec(fullText)) !== null) {
+          ids.add(m[1]);
+        }
+      }
+
+      return Array.from(ids);
+    } catch (e: unknown) {
+      toast("Excel parse error: " + (e as Error).message, "error");
+      return [];
+    }
+  };
+
+  // ── handle bank statement upload (PDF or Excel) ──────────────────────────
   const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setPdfFileName(file.name);
-    showLoading("Parsing PDF statement...");
-    const ids = await parsePdf(file);
+    const isExcel = /\.(xlsx|xls|csv)$/i.test(file.name);
+    showLoading(isExcel ? "Parsing Excel statement..." : "Parsing PDF statement...");
+    const ids = isExcel ? await parseExcel(file) : await parsePdf(file);
     hideLoading();
     if (ids.length === 0) {
-      toast("No transaction IDs found in the uploaded PDF", "error");
+      toast(`No transaction IDs found in the uploaded ${isExcel ? "Excel" : "PDF"}`, "error");
       setPdfTxIds(null);
       setPdfTxIdList([]);
       setPdfFileName("");
@@ -1590,7 +1658,7 @@ export default function Dashboard() {
       setPdfTxIds(new Set(ids));
       setPdfTxIdList(ids);
       toast(
-        `Found ${ids.length} transaction ID(s) in PDF – filtering list`,
+        `Found ${ids.length} transaction ID(s) in ${isExcel ? "Excel" : "PDF"} – filtering list`,
         "success",
       );
     }
@@ -1721,7 +1789,28 @@ export default function Dashboard() {
   // ── add / edit ────────────────────────────────────────────────────────────
   const openAddModal = () => {
     setState((prev) => ({ ...prev, editingDoc: null }));
-    setEditFormData({ name: "", email: "", eventName: "" });
+    // Pre-select event when a specific collection is already open
+    const preselectedEvent =
+      state.col && state.col !== "__all__"
+        ? (DISPLAY_NAME_MAP[state.col] ?? "")
+        : isRegistrar && assignedEvent && assignedEvent !== "*"
+          ? (DISPLAY_NAME_MAP[assignedEvent] ?? "")
+          : "";
+    setEditFormData({
+      firstName: "",
+      lastName: "",
+      email: "",
+      contactNumber: "",
+      gender: "",
+      paymentMode: "",
+      transactionId: "",
+      collegeName: "",
+      department: "",
+      yearOfStudy: "",
+      collegeRegisterNumber: "",
+      city: "",
+      eventName: preselectedEvent,
+    });
     openModal("doc");
   };
 
@@ -1753,13 +1842,36 @@ export default function Dashboard() {
 
   const saveDoc = async () => {
     const data: Record<string, unknown> = { ...editFormData };
-    const col = effectiveCol();
+    let col = effectiveCol();
 
     if (state.editingDoc) {
       Object.keys(data).forEach((k) => {
         if (data[k] === "[IMAGE DATA PRESERVED]" && state.editingDoc![k])
           data[k] = state.editingDoc![k];
       });
+    } else {
+      // For new docs: derive target collection from the chosen event name
+      const colFromEvent =
+        EVENT_DISPLAY_TO_COLLECTION[String(data.eventName ?? "")];
+      if (colFromEvent) col = colFromEvent;
+      // Drop transactionId when payment is Cash
+      if (data.paymentMode !== "UPI") delete data.transactionId;
+      // Validate required fields
+      const required = [
+        "firstName", "lastName", "email", "contactNumber",
+        "gender", "paymentMode", "collegeName", "department",
+        "yearOfStudy", "collegeRegisterNumber", "city", "eventName",
+      ];
+      for (const f of required) {
+        if (!String(data[f] ?? "").trim()) {
+          toast(`${formatKey(f)} is required`, "error");
+          return;
+        }
+      }
+      if (data.paymentMode === "UPI" && !String(data.transactionId ?? "").trim()) {
+        toast("Transaction ID is required for UPI payment", "error");
+        return;
+      }
     }
 
     closeModal("doc");
@@ -2045,7 +2157,7 @@ export default function Dashboard() {
 
   const allowedTabs = (() => {
     if (isScanner) return ["scanner"] as const;
-    if (isViewer) return ["records"] as const;
+    if (isViewer || isRegistrar) return ["records"] as const;
     return ["records", "scanner"] as const;
   })();
 
@@ -2244,7 +2356,7 @@ export default function Dashboard() {
               onChange={(e) => onColChange(e.target.value)}
               disabled={!state.db}
             >
-              <option value="">Select Collection</option>
+              <option value="">Select Event</option>
               <option value="__all__">All Events</option>
               {cols.map((c) => (
                 <option key={c} value={c}>
@@ -2252,6 +2364,51 @@ export default function Dashboard() {
                 </option>
               ))}
             </select>
+          </div>
+        ) : isRegistrar ? (
+          <div className="header-selects">
+            <div
+              style={{
+                padding: "8px 12px",
+                borderRadius: 6,
+                background: "var(--card)",
+                fontSize: 13,
+              }}
+            >
+              Database: <strong style={{ marginLeft: 6 }}>test</strong>
+            </div>
+            {assignedEvent === "*" ? (
+              <select
+                value={state.col}
+                onChange={(e) =>
+                  setState((s) => ({ ...s, col: e.target.value }))
+                }
+              >
+                <option value="">Select Event</option>
+                {EVENT_OPTIONS.map((ev) => (
+                  <option
+                    key={ev}
+                    value={EVENT_DISPLAY_TO_COLLECTION[ev] ?? ev}
+                  >
+                    {ev}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 6,
+                  background: "var(--card)",
+                  fontSize: 13,
+                }}
+              >
+                Event:{" "}
+                <strong style={{ marginLeft: 6 }}>
+                  {assignedEvent ? getEventDisplayName(assignedEvent) : "—"}
+                </strong>
+              </div>
+            )}
           </div>
         ) : isViewer ? (
           <div className="header-selects">
@@ -2330,6 +2487,14 @@ export default function Dashboard() {
               <i className="fas fa-download" /> Export
             </button>
           )}
+          {isRegistrar && (
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={openAddModal}
+            >
+              <i className="fas fa-plus" /> Add Participant
+            </button>
+          )}
           {isAdmin && (
             <>
               <button
@@ -2342,7 +2507,6 @@ export default function Dashboard() {
               <button
                 className="btn btn-primary btn-sm"
                 onClick={openAddModal}
-                disabled={!state.col}
               >
                 <i className="fas fa-plus" /> Add
               </button>
@@ -2396,7 +2560,7 @@ export default function Dashboard() {
       {/* MAIN */}
       <div className={`main main--${activeTab}`}>
         {/* Desktop inline sidebar content (no drawer) */}
-        {!isScanner && (
+        {!isScanner && !isRegistrar && (
           <div
             className="sidebar-inline desktop-only"
             style={{
@@ -2418,8 +2582,28 @@ export default function Dashboard() {
                     ? getEventDisplayName(state.col)
                     : "All Records"}
               </span>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <span className="badge">{state.filtered.length}</span>
+                {isAdmin && state.col && (
+                  <>
+                    <button
+                      className="btn btn-primary btn-sm"
+                      style={{ padding: "2px 8px", fontSize: 11 }}
+                      onClick={openAddModal}
+                      title="Add Participant"
+                    >
+                      <i className="fas fa-plus" /> Add
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      style={{ padding: "2px 8px", fontSize: 11 }}
+                      onClick={openUsersModal}
+                      title="Manage Users"
+                    >
+                      <i className="fas fa-users-cog" />
+                    </button>
+                  </>
+                )}
               </div>
             </div>
             <div
@@ -2467,7 +2651,7 @@ export default function Dashboard() {
                 <input
                   ref={pdfInputRef}
                   type="file"
-                  accept=".pdf"
+                  accept=".pdf,.xlsx,.xls,.csv"
                   style={{ display: "none" }}
                   onChange={handlePdfUpload}
                 />
@@ -2485,8 +2669,8 @@ export default function Dashboard() {
                     }}
                   >
                     <i
-                      className="fas fa-file-pdf"
-                      style={{ color: "var(--red)" }}
+                      className="fas fa-file-invoice"
+                      style={{ color: "var(--accent)" }}
                     />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div
@@ -2511,7 +2695,7 @@ export default function Dashboard() {
                           marginTop: 1,
                         }}
                       >
-                        {pdfTxIds?.size ?? 0} transaction ID(s) from PDF
+                        {pdfTxIds?.size ?? 0} transaction ID(s) from statement
                       </div>
                     </div>
                     <button
@@ -2542,10 +2726,10 @@ export default function Dashboard() {
                     onClick={() => pdfInputRef.current?.click()}
                   >
                     <i
-                      className="fas fa-file-pdf"
-                      style={{ color: "var(--red)", marginRight: 6 }}
+                      className="fas fa-file-invoice"
+                      style={{ color: "var(--accent)", marginRight: 6 }}
                     />
-                    Upload Bank Statement PDF
+                    Upload Bank Statement
                   </button>
                 )}
               </div>
@@ -2561,6 +2745,49 @@ export default function Dashboard() {
         >
           <div className="content">
             {stats && <StatsGrid stats={stats} />}
+            {/* Registrar: only show a simple add-participant prompt */}
+            {isRegistrar && (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  minHeight: 320,
+                  gap: 16,
+                  textAlign: "center",
+                  padding: 32,
+                }}
+              >
+                <div
+                  style={{
+                    width: 64,
+                    height: 64,
+                    borderRadius: "50%",
+                    background: "var(--accent)18",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 28,
+                    color: "var(--accent)",
+                  }}
+                >
+                  <i className="fas fa-user-plus" />
+                </div>
+                <h3 style={{ margin: 0, fontWeight: 700 }}>Register Participant</h3>
+                <p style={{ margin: 0, color: "var(--muted)", fontSize: 14, maxWidth: 320 }}>
+                  {assignedEvent && assignedEvent !== "*"
+                    ? `You are authorised to add participants for: ${getEventDisplayName(assignedEvent)}`
+                    : "Select an event from the header, then click Add Participant."}
+                </p>
+                <button
+                  className="btn btn-primary"
+                  onClick={openAddModal}
+                >
+                  <i className="fas fa-plus" /> Add Participant
+                </button>
+              </div>
+            )}
             {/* Mobile: place filters below stats and results below filters */}
             {(isAdmin || isViewer) && (
               <div className="mobile-only" style={{ padding: "12px 0" }}>
@@ -2591,6 +2818,25 @@ export default function Dashboard() {
                     onChange={(e) => setSearchQ(e.target.value)}
                   />
                 </div>
+                {/* Mobile Add / Users buttons for admin */}
+                {isAdmin && state.col && (
+                  <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                    <button
+                      className="btn btn-primary btn-sm"
+                      style={{ flex: 1, fontSize: 12 }}
+                      onClick={openAddModal}
+                    >
+                      <i className="fas fa-plus" /> Add Participant
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      style={{ fontSize: 12 }}
+                      onClick={openUsersModal}
+                    >
+                      <i className="fas fa-users-cog" /> Users
+                    </button>
+                  </div>
+                )}
                 {/* Mobile PDF filter */}
                 <div style={{ marginTop: 8 }}>
                   {pdfTxIds ? (
@@ -2607,8 +2853,8 @@ export default function Dashboard() {
                       }}
                     >
                       <i
-                        className="fas fa-file-pdf"
-                        style={{ color: "var(--red)" }}
+                        className="fas fa-file-invoice"
+                        style={{ color: "var(--accent)" }}
                       />
                       <span
                         style={{
@@ -2617,7 +2863,7 @@ export default function Dashboard() {
                           fontWeight: 600,
                         }}
                       >
-                        PDF: {pdfTxIds.size} ID(s) matched
+                        Statement: {pdfTxIds.size} ID(s) matched
                       </span>
                       <button
                         className="btn btn-ghost btn-sm"
@@ -2638,10 +2884,10 @@ export default function Dashboard() {
                       onClick={() => pdfInputRef.current?.click()}
                     >
                       <i
-                        className="fas fa-file-pdf"
-                        style={{ color: "var(--red)", marginRight: 6 }}
+                        className="fas fa-file-invoice"
+                        style={{ color: "var(--accent)", marginRight: 6 }}
                       />
-                      Upload Bank Statement PDF
+                      Upload Bank Statement
                     </button>
                   )}
                 </div>
@@ -2754,7 +3000,7 @@ export default function Dashboard() {
       {/* ── ADD/EDIT DOC MODAL ── */}
       {modals.doc && (
         <div className="modal-overlay open">
-          <div className="modal" style={{ minWidth: 600, maxWidth: "90vw" }}>
+          <div className="modal" style={{ minWidth: 640, maxWidth: "95vw" }}>
             <div className="modal-title">
               <i
                 className={`fas fa-${state.editingDoc ? "edit" : "plus"}`}
@@ -2767,45 +3013,250 @@ export default function Dashboard() {
             >
               {state.editingDoc
                 ? "Update participant details. Fields marked [IMAGE DATA PRESERVED] cannot be edited here."
-                : "Fill out the participant details."}
+                : "Fields marked * are required."}
             </p>
             <div
               style={{
                 display: "grid",
                 gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
                 gap: 16,
-                maxHeight: "60vh",
+                maxHeight: "65vh",
                 overflowY: "auto",
                 paddingRight: 8,
               }}
             >
-              {Object.entries(editFormData).map(([key, val]) => (
-                <div
-                  key={key}
-                  className="form-group"
-                  style={{ marginBottom: 0 }}
-                >
-                  <label
-                    className="form-label"
-                    style={{ textTransform: "capitalize" }}
+              {!state.editingDoc ? (
+                /* ── Structured Add form ── */
+                <>
+                  {/* Event Name */}
+                  <div className="form-group" style={{ marginBottom: 0, gridColumn: "1 / -1" }}>
+                    <label className="form-label">Event Name *</label>
+                    <select
+                      className="form-input"
+                      value={String(editFormData.eventName ?? "")}
+                      disabled={
+                        isRegistrar &&
+                        !!assignedEvent &&
+                        assignedEvent !== "*"
+                      }
+                      onChange={(e) =>
+                        setEditFormData((prev) => ({ ...prev, eventName: e.target.value }))
+                      }
+                    >
+                      <option value="">— Select Event —</option>
+                      {EVENT_OPTIONS.map((ev) => (
+                        <option key={ev} value={ev}>{ev}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* First Name */}
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">First Name *</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={String(editFormData.firstName ?? "")}
+                      onChange={(e) =>
+                        setEditFormData((prev) => ({ ...prev, firstName: e.target.value }))
+                      }
+                    />
+                  </div>
+
+                  {/* Last Name */}
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Last Name *</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={String(editFormData.lastName ?? "")}
+                      onChange={(e) =>
+                        setEditFormData((prev) => ({ ...prev, lastName: e.target.value }))
+                      }
+                    />
+                  </div>
+
+                  {/* Email */}
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Email *</label>
+                    <input
+                      type="email"
+                      className="form-input"
+                      value={String(editFormData.email ?? "")}
+                      onChange={(e) =>
+                        setEditFormData((prev) => ({ ...prev, email: e.target.value }))
+                      }
+                    />
+                  </div>
+
+                  {/* Contact Number */}
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Contact Number *</label>
+                    <input
+                      type="tel"
+                      className="form-input"
+                      value={String(editFormData.contactNumber ?? "")}
+                      onChange={(e) =>
+                        setEditFormData((prev) => ({ ...prev, contactNumber: e.target.value }))
+                      }
+                    />
+                  </div>
+
+                  {/* Gender */}
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Gender *</label>
+                    <select
+                      className="form-input"
+                      value={String(editFormData.gender ?? "")}
+                      onChange={(e) =>
+                        setEditFormData((prev) => ({ ...prev, gender: e.target.value }))
+                      }
+                    >
+                      <option value="">— Select —</option>
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+
+                  {/* Payment Mode */}
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Payment Mode *</label>
+                    <select
+                      className="form-input"
+                      value={String(editFormData.paymentMode ?? "")}
+                      onChange={(e) =>
+                        setEditFormData((prev) => ({
+                          ...prev,
+                          paymentMode: e.target.value,
+                          transactionId: e.target.value === "Cash" ? "" : prev.transactionId,
+                        }))
+                      }
+                    >
+                      <option value="">— Select —</option>
+                      <option value="UPI">UPI</option>
+                      <option value="Cash">Cash</option>
+                    </select>
+                  </div>
+
+                  {/* Transaction ID – only for UPI */}
+                  {editFormData.paymentMode === "UPI" && (
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">Transaction ID (UPI) *</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={String(editFormData.transactionId ?? "")}
+                        onChange={(e) =>
+                          setEditFormData((prev) => ({ ...prev, transactionId: e.target.value }))
+                        }
+                      />
+                    </div>
+                  )}
+
+                  {/* College Name */}
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">College Name *</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={String(editFormData.collegeName ?? "")}
+                      onChange={(e) =>
+                        setEditFormData((prev) => ({ ...prev, collegeName: e.target.value }))
+                      }
+                    />
+                  </div>
+
+                  {/* Department */}
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Department *</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={String(editFormData.department ?? "")}
+                      onChange={(e) =>
+                        setEditFormData((prev) => ({ ...prev, department: e.target.value }))
+                      }
+                    />
+                  </div>
+
+                  {/* Year of Study */}
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Year of Study *</label>
+                    <select
+                      className="form-input"
+                      value={String(editFormData.yearOfStudy ?? "")}
+                      onChange={(e) =>
+                        setEditFormData((prev) => ({ ...prev, yearOfStudy: e.target.value }))
+                      }
+                    >
+                      <option value="">— Select —</option>
+                      <option value="1st Year">1st Year</option>
+                      <option value="2nd Year">2nd Year</option>
+                      <option value="3rd Year">3rd Year</option>
+                      <option value="4th Year">4th Year</option>
+                    </select>
+                  </div>
+
+                  {/* College Register Number */}
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">College Register Number *</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={String(editFormData.collegeRegisterNumber ?? "")}
+                      onChange={(e) =>
+                        setEditFormData((prev) => ({
+                          ...prev,
+                          collegeRegisterNumber: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+
+                  {/* City */}
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">City *</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={String(editFormData.city ?? "")}
+                      onChange={(e) =>
+                        setEditFormData((prev) => ({ ...prev, city: e.target.value }))
+                      }
+                    />
+                  </div>
+                </>
+              ) : (
+                /* ── Generic Edit form ── */
+                Object.entries(editFormData).map(([key, val]) => (
+                  <div
+                    key={key}
+                    className="form-group"
+                    style={{ marginBottom: 0 }}
                   >
-                    {formatKey(key)}
-                  </label>
-                  <input
-                    type={typeof val === "number" ? "number" : "text"}
-                    className="form-input"
-                    value={val === null || val === undefined ? "" : String(val)}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setEditFormData((prev) => ({
-                        ...prev,
-                        [key]: typeof val === "number" ? Number(v) : v,
-                      }));
-                    }}
-                    disabled={val === "[IMAGE DATA PRESERVED]"}
-                  />
-                </div>
-              ))}
+                    <label
+                      className="form-label"
+                      style={{ textTransform: "capitalize" }}
+                    >
+                      {formatKey(key)}
+                    </label>
+                    <input
+                      type={typeof val === "number" ? "number" : "text"}
+                      className="form-input"
+                      value={val === null || val === undefined ? "" : String(val)}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setEditFormData((prev) => ({
+                          ...prev,
+                          [key]: typeof val === "number" ? Number(v) : v,
+                        }));
+                      }}
+                      disabled={val === "[IMAGE DATA PRESERVED]"}
+                    />
+                  </div>
+                ))
+              )}
             </div>
             <div className="modal-actions" style={{ marginTop: 24 }}>
               <button
@@ -2815,7 +3266,7 @@ export default function Dashboard() {
                 Cancel
               </button>
               <button className="btn btn-primary" onClick={saveDoc}>
-                <i className="fas fa-save" /> Save
+                <i className="fas fa-save" /> {state.editingDoc ? "Save" : "Add"}
               </button>
             </div>
           </div>

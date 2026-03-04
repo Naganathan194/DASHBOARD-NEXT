@@ -5,6 +5,7 @@ export const ROLES = {
   ADMIN: 'ADMIN',
   ATTENDEE_VIEWER: 'ATTENDEE_VIEWER',
   SCANNER: 'SCANNER',
+  REGISTRAR: 'REGISTRAR',
 } as const;
 
 type Role = (typeof ROLES)[keyof typeof ROLES];
@@ -78,8 +79,8 @@ export function assertAssignedEvent(payload: Record<string, unknown>, collection
   try {
     const role = String(payload.role || '');
     if (role === ROLES.ADMIN) return null;
-    // only enforce for viewer and scanner
-    if (role === ROLES.ATTENDEE_VIEWER || role === ROLES.SCANNER) {
+    // only enforce for viewer, scanner, and registrar
+    if (role === ROLES.ATTENDEE_VIEWER || role === ROLES.SCANNER || role === ROLES.REGISTRAR) {
       const assigned = String(payload.assignedEvent ?? '');
       if (!assigned) return NextResponse.json({ error: 'No event assigned' }, { status: 403 });
       // '*' means all-events access — skip collection check

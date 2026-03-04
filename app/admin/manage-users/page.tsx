@@ -75,9 +75,9 @@ export default function ManageUsersPage() {
       alert("Username and password (min 8 chars) required");
       return;
     }
-    // Assigned event required for Viewer/Scanner ("*" = all events is valid)
+    // Assigned event required for Viewer/Scanner/Registrar ("*" = all events is valid)
     if (
-      (form.role === "ATTENDEE_VIEWER" || form.role === "SCANNER") &&
+      (form.role === "ATTENDEE_VIEWER" || form.role === "SCANNER" || form.role === "REGISTRAR") &&
       !form.assignedEvent
     ) {
       alert("Assigned Event required for selected role");
@@ -147,9 +147,9 @@ export default function ManageUsersPage() {
       alert("Cannot assign ADMIN role");
       return;
     }
-    // Assigned event required for Viewer/Scanner ("*" = all events is valid)
+    // Assigned event required for Viewer/Scanner/Registrar ("*" = all events is valid)
     if (
-      (editForm.role === "ATTENDEE_VIEWER" || editForm.role === "SCANNER") &&
+      (editForm.role === "ATTENDEE_VIEWER" || editForm.role === "SCANNER" || editForm.role === "REGISTRAR") &&
       !editForm.assignedEvent
     ) {
       alert("Assigned Event required for selected role");
@@ -243,6 +243,7 @@ export default function ManageUsersPage() {
                 }
               >
                 <option value="ATTENDEE_VIEWER">Attendee Viewer</option>
+                <option value="REGISTRAR">Registrar (Add Only)</option>
                 <option value="SCANNER">Scanner</option>
               </select>
 
@@ -333,14 +334,25 @@ export default function ManageUsersPage() {
                             <option value="ATTENDEE_VIEWER">
                               Attendee Viewer
                             </option>
+                            <option value="REGISTRAR">Registrar (Add Only)</option>
                             <option value="SCANNER">Scanner</option>
                           </select>
                         ) : (
                           <span
-                            className={`role-badge ${u.role === "SCANNER" ? "badge-scanner" : "badge-viewer"}`}
+                            className={`role-badge ${
+                              u.role === "SCANNER"
+                                ? "badge-scanner"
+                                : u.role === "REGISTRAR"
+                                  ? "badge-registrar"
+                                  : "badge-viewer"
+                            }`}
                           >
                             {u.role === "SCANNER"
                               ? "Scanner"
+                              : u.role === "REGISTRAR"
+                                ? "Registrar"
+                              : u.role === "REGISTRAR"
+                              ? "Registrar"
                               : "Attendee Viewer"}
                           </span>
                         )}
@@ -487,6 +499,7 @@ export default function ManageUsersPage() {
                           <option value="ATTENDEE_VIEWER">
                             Attendee Viewer
                           </option>
+                          <option value="REGISTRAR">Registrar (Add Only)</option>
                           <option value="SCANNER">Scanner</option>
                         </select>
                         <select
@@ -559,7 +572,9 @@ export default function ManageUsersPage() {
                             >
                               {u.role === "SCANNER"
                                 ? "Scanner"
-                                : "Attendee Viewer"}
+                                : u.role === "REGISTRAR"
+                                  ? "Registrar"
+                                  : "Attendee Viewer"}
                             </span>
                           </div>
                         </div>
@@ -612,6 +627,7 @@ export default function ManageUsersPage() {
           .role-badge { display: inline-block; padding: 6px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
           .badge-scanner { background: rgba(254,243,199,0.8); color: #b26b00; }
           .badge-viewer { background: rgba(221,235,255,0.9); color: #0b3d91; }
+          .badge-registrar { background: rgba(220,252,231,0.9); color: #166534; }
 
           /* Mobile cards (hidden on desktop) */
           .mobile-cards { display: none; gap: 12px; }
